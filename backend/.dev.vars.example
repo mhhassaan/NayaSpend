@@ -1,0 +1,14 @@
+# Copy this file to .dev.vars (gitignored) and fill in real values for local `wrangler dev`.
+
+# Gmail OAuth client ID, from the Google Cloud Console credentials page.
+GMAIL_CLIENT_ID=your-gmail-oauth-client-id
+
+# Gmail OAuth client secret, from the same credentials page.
+GMAIL_CLIENT_SECRET=your-gmail-oauth-client-secret
+
+# Resend API key (https://resend.com), used for outbound email notifications.
+RESEND_API_KEY=your-resend-api-key
+
+# Base64-encoded 256-bit key used to AES-256-GCM encrypt the Gmail OAuth
+# token at rest. Generate with: openssl rand -base64 32
+TOKEN_ENCRYPTION_KEY=your-base64-encoded-32-byte-key
