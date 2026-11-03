@@ -7,6 +7,18 @@ binding = "DB"
 database_name = "nayaspend"
 database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
 
+# Capture Scheduler retry queue: on a Gmail API failure, a retry message
+# is enqueued with a delaySeconds of 60/300/900 (1/5/15 min) instead of
+# an in-process sleep, since a single Worker invocation has a bounded
+# execution time. See backend/src/services/captureScheduler.ts.
+[[queues.producers]]
+queue = "capture-retry"
+binding = "CAPTURE_RETRY_QUEUE"
+
+[[queues.consumers]]
+queue = "capture-retry"
+max_batch_size = 1
+
 # Three Cron Triggers, all currently dispatching to the placeholder
 # `scheduled` export in src/index.ts (Task 1, Step 5). Each will be wired
 # to its real handler (captureScheduler, watchdog, budget/bill evaluation)
