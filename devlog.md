@@ -180,10 +180,10 @@ once real bank statement samples exist.
 
 ---
 
-## Phase 5: Ongoing Gmail polling + reliability — **implemented, pending final review and merge**
+## Phase 5: Ongoing Gmail polling + reliability — merged to master
 
 **Plan:** `docs/superpowers/plans/2026-11-03-ongoing-polling-reliability.md`
-**Branch:** `worktree-ongoing-polling` (not yet merged)
+**Branch:** `worktree-ongoing-polling` (merged, deleted)
 
 Scope: forward (`historyId`-based) Gmail polling, the Capture Scheduler
 cron handler with Cloudflare Queue retry backoff, the Watchdog, and the
@@ -202,7 +202,9 @@ notification engine they both depend on.
 - **Seeded `pollingHistoryId` the moment backfill completes** (inside
   `runBackfill`'s existing completion branch, via `getCurrentHistoryId()`)
   so ongoing polling picks up exactly where backfill leaves off, with no
-  gap or overlap.
+  gap or overlap. *(Superseded by the final review — see below: seeding
+  at completion left a real gap for mail arriving mid-backfill. Fixed to
+  seed once, before the very first page is ever listed.)*
 - `captureScheduler.ts` takes an injected `QueueSender` interface
   (mirroring the `GmailClient` injection pattern from Phase 2) so retry
   logic is unit-testable without a live Cloudflare Queue.
@@ -243,16 +245,39 @@ self-caught during implementation):**
   via a real decrypted credential, `sendNotification` actually invoked,
   the budget/bill cron confirmed as a true no-op).
 
-**Status: NOT yet merged.** Still needs: a fresh-reviewer final pass
-(same process as Phases 0-3), any Critical/Important fixes that review
-surfaces, then merge to `master`.
+**Final review (fresh-context Agent, opus) — 6 Critical + 7 Important + 6 Minor findings, before this phase ever touched real Gmail/Cloudflare infrastructure:**
+
+| # | Finding | Fix |
+|---|---|---|
+| C1 | `history.list` has no sender/subject filter — every mailbox-wide message (not just NayaPay mail) was fetched and stored, junking the review queue with unrelated email | Added `matchesNayaPayScope` (per-message skip, no row written) + a `labelId=INBOX` filter as a cheap first pass |
+| C2 | `history.list` pagination was never followed — any gap over one page (`maxResults`) was silently skipped forever, with the watermark still advancing past it | Loop `nextPageToken` to exhaustion before resolving the new watermark |
+| C3 | `pollingHistoryId` was seeded only at backfill *completion* — missed any mail arriving during a multi-hour/multi-run backfill | Seed once, before the very first page is ever listed; never re-seeded once set |
+| C4 | Watchdog could never detect the cron itself going silent — a frozen `"success"` status from the last real run looked healthy forever | Escalate when `lastAttemptedRun` itself goes stale, gated on a connected `gmailCredentials` row |
+| C5 | An error escaping `runBackfill`/`runOngoingPoll`'s own internal handling (e.g. `getCurrentHistoryId` failing mid-seed) was silently swallowed by `captureScheduler`'s bare `catch {}` — no retry, no Watchdog visibility | Record the failure wherever it can occur: scheduler's catch, `index.ts`'s client-building step, the queue handler |
+| C6 | The stored Gmail access token was never refreshed — every poll past the first hour would 401 forever | New `services/gmailTokenRefresh.ts`, wired into `buildGmailClientFromStoredCredentials` with a 5-minute expiry skew |
+| I1 | An expired history watermark (Gmail 404) had no recovery path | Reseed via `getCurrentHistoryId` on `history_expired`; the resulting gap is left to statement-import's existing dedup as the documented backstop (reduced scope vs. a full `messages.list`-based catchup) |
+| I2 | A pre-existing row with `backfillCompletedAt` set but `pollingHistoryId` still null (e.g. production data predating this column) polls forever as a silent no-op | Self-heals by seeding it on first encounter |
+| I3 | A per-message fetch failure during polling still advanced the watermark past it — unlike backfill, Gmail has no later page to recover it on | Watermark no longer advances past a run with any fetch failure |
+| I6 | `MAX_ATTEMPTS` naming implied 3 total attempts; actually 3 retries + the original = 4. `auth_failure` was retried 3 times with no chance of success | Renamed to `MAX_RETRIES`; `auth_failure` skips the queue entirely, straight to the Watchdog |
+| I7 | `queue()` had no per-message ack/retry — a thrown error left the whole batch to Cloudflare's own platform-level redelivery, stacking on top of the app's own retry chain | Every message acked itself (success or failure); `wrangler.toml`'s consumer sets `max_retries = 0` to match |
+| M1 | Stale `wrangler.toml` comment (still described the Task-1 placeholder) | Fixed |
+| M2 | `notificationEngine` required the *full* config (including Gmail secrets) just to send an alert — a broken Gmail secret could silence the Watchdog too | Narrowed to its own two secrets (`RESEND_API_KEY`, `NOTIFICATION_EMAIL`) |
+| M4 | ~60 lines of fetch/parse/categorize/build-rows logic duplicated between `runBackfill`/`runOngoingPoll`, risking C1/I3's fixes landing in only one place | Extracted shared `fetchAndBuildRows` helper (kept the batch-insert/dedup step duplicated — it didn't need the fix and fighting Drizzle's batch typing for a shared wrapper wasn't worth it) |
+
+**Deferred, with written rulings in the SDD ledger (`.superpowers/sdd/2026-11-03-ongoing-polling-reliability/progress.md`) — all noisy/cosmetic, none are data-loss:**
+- **I4** — Watchdog re-sends its alert every hour while unhealthy (no debounce). Needs a new `lastNotifiedAt` column; revisit with Phase 7's notification preferences.
+- **I5** — Watchdog's "2 consecutive failed runs" check can fire on a brand-new connection's very first failed attempt, before the retry chain even exhausts (~20 min). Needs a new "first-failed-at" column; cost of being wrong is one early email.
+- **M3** — `GmailErrorType`'s `network_timeout` is declared but never actually produced (pre-existing from Phase 2, a fetch-level `TypeError` falls through to `unknown`). Cosmetic text accuracy only.
+- **M5** — `scheduled()`'s own try/catch still shows cron invocations as "succeeded" on Cloudflare's dashboard even when the dispatched capture failed. Harmless now that C5 ensures `capture_runs` (what the Watchdog and any human actually check) gets the real status.
+- **M6** — One redundant `captureRuns` read in `runOngoingPoll` (the scheduler already read the row). Trivial; kept for consistency with `runBackfill`'s identical existing pattern.
+
+Fix commit: all 6 Critical + 5 Important + 2 Minor findings fixed in one TDD pass. **140/140 tests passing** (up from 114), clean `tsc --noEmit`. Merged to `master` (fast, clean `ort` merge; branch + worktree deleted after verifying the merged result's tests/build stayed green).
 
 ---
 
 ## Still ahead
 
-- **Phase 5 final review + merge** (next step).
-- **Phase 6** — missed-transaction fallback (manual adapter, routes).
+- **Phase 6** (next step) — missed-transaction fallback (manual adapter, routes).
 - **Phase 7** — trends, budgets, bill reminders, remaining API routes
   (including mounting `authGmail.ts`, at which point I6(b)'s deferred
   CSRF `state` parameter must be addressed), and the deferred
@@ -270,6 +295,9 @@ surfaces, then merge to `master`.
   ever mounted/exposed publicly (Phase 7/8).
 - Statement-import chunking/resumability for large files should be
   designed together with Phase 7's upload route, not bolted on after.
+- Watchdog notification debounce (I4) and first-failure grace period
+  (I5) — both need a new `capture_runs` column; natural to bundle with
+  Phase 7's notification preferences work rather than a one-off migration.
 - All of Phase 0-1's and Phase 2-3's deferred minors (see each section
   above) remain unaddressed — none are blocking, all are cheap to pick
   up when next touching their files.
