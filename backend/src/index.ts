@@ -6,9 +6,17 @@ import { GmailApiError } from "./adapters/gmailClient";
 import { runCaptureScheduler } from "./services/captureScheduler";
 import { checkCaptureHealth } from "./services/watchdog";
 import { getGmailClient } from "./services/gmailCredentialStore";
+import { evaluateBudgets } from "./services/budgetAlertTrigger";
+import { evaluateBills } from "./services/billReminderTrigger";
 import type { ConfigEnv } from "./config";
 import { transactionsRoutes } from "./routes/transactions";
 import { missedTransactionsRoutes } from "./routes/missedTransactions";
+import { budgetsRoutes } from "./routes/budgets";
+import { billsRoutes } from "./routes/bills";
+import { trendsRoutes } from "./routes/trends";
+import { statementsRoutes } from "./routes/statements";
+import { captureRoutes } from "./routes/capture";
+import { authGmailRoutes } from "./routes/authGmail";
 
 type Env = ConfigEnv & {
   DB: D1Database;
@@ -21,6 +29,12 @@ const WATCHDOG_CRON = "30 * * * *";
 const app = new Hono<{ Bindings: Env }>();
 app.route("/transactions", transactionsRoutes);
 app.route("/missed-transactions", missedTransactionsRoutes);
+app.route("/budgets", budgetsRoutes);
+app.route("/bills", billsRoutes);
+app.route("/trends", trendsRoutes);
+app.route("/statements", statementsRoutes);
+app.route("/capture", captureRoutes);
+app.route("/auth/gmail", authGmailRoutes);
 
 async function recordDispatchFailure(env: Env, err: unknown) {
   const db = drizzle(env.DB);
@@ -72,8 +86,10 @@ export default {
       } else if (event.cron === WATCHDOG_CRON) {
         await dispatchWatchdog(env);
       } else {
-        // Every-6-hours budget/bill evaluation cron: intentionally a
-        // no-op until Phase 7 builds budgetAlertTrigger/billReminderTrigger.
+        // Every-6-hours budget/bill evaluation cron.
+        const db = drizzle(env.DB);
+        await evaluateBudgets(db, env);
+        await evaluateBills(db, env);
       }
     } catch (err) {
       // A missing/invalid config (e.g. no Gmail connected, bad secrets)

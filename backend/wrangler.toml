@@ -26,8 +26,8 @@ max_retries = 0
 
 # Three Cron Triggers, dispatched in src/index.ts's scheduled() handler
 # to their real implementations: captureScheduler (hourly), watchdog
-# (hourly, offset 30 min). The third (every 6 hours) is still an
-# intentional no-op until Phase 7 builds budget/bill evaluation.
+# (hourly, offset 30 min), and budgetAlertTrigger/billReminderTrigger
+# (every 6 hours).
 [triggers]
 crons = [
   "0 * * * *",    # hourly: Capture Scheduler

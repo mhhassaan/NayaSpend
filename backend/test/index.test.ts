@@ -2,7 +2,7 @@ import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, test, vi } from "vitest";
 import worker from "../src/index";
-import { captureRuns, gmailCredentials } from "../src/db/schema";
+import { budgets, captureRuns, gmailCredentials, transactions } from "../src/db/schema";
 import { decryptToken, encryptToken } from "../src/security";
 
 const testEnv = {
@@ -153,7 +153,7 @@ describe("scheduled handler", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test("the budget/bill cron is still a documented no-op (Phase 7 not built yet)", async () => {
+  test("the budget/bill cron dispatches evaluation but sends nothing when no budgets or bills exist", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const controller = { cron: "0 */6 * * *", scheduledTime: Date.now() } as ScheduledController;
@@ -163,6 +163,24 @@ describe("scheduled handler", () => {
     await waitOnExecutionContext(ctx);
 
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("the every-6-hours cron now dispatches to evaluateBudgets/evaluateBills instead of being a no-op", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(budgets).values({ category: "Coffee", limitAmount: 100, periodType: "monthly" });
+    await db.insert(transactions).values({
+      amount: 100, date: new Date().toISOString().slice(0, 10), vendorRaw: "x", vendorNormalized: "x",
+      category: "Coffee", source: "manual_missed", provenance: "{}", reviewStatus: "committed",
+    });
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const controller = { cron: "0 */6 * * *", scheduledTime: Date.now() } as ScheduledController;
+    const ctx = createExecutionContext();
+    await worker.scheduled!(controller, testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    expect(fetchSpy).toHaveBeenCalledOnce(); // the budget alert
   });
 });
 
@@ -239,5 +257,13 @@ describe("app routing", () => {
       testEnv
     );
     expect(postRes.status).toBe(201);
+  });
+
+  test("the real app serves /budgets, /bills, /trends, /statements, /capture/health, and /auth/gmail/connect", async () => {
+    expect((await worker.fetch(new Request("https://example.com/budgets"), testEnv)).status).toBe(200);
+    expect((await worker.fetch(new Request("https://example.com/bills"), testEnv)).status).toBe(200);
+    expect((await worker.fetch(new Request("https://example.com/trends"), testEnv)).status).toBe(200);
+    expect((await worker.fetch(new Request("https://example.com/capture/health"), testEnv)).status).toBe(200);
+    expect((await worker.fetch(new Request("https://example.com/auth/gmail/connect"), testEnv)).status).toBe(302);
   });
 });
