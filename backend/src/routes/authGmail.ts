@@ -1,4 +1,5 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { loadConfig } from "../config";
@@ -17,11 +18,16 @@ type Env = {
 export const authGmailRoutes = new Hono<{ Bindings: Env }>();
 
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+const NONCE_COOKIE_NAME = "gmail_oauth_nonce";
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function randomNonce(): string {
+  return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(18)));
 }
 
 async function hmacSha256(message: string, base64Key: string): Promise<Uint8Array> {
@@ -31,32 +37,58 @@ async function hmacSha256(message: string, base64Key: string): Promise<Uint8Arra
   return new Uint8Array(signature);
 }
 
-// Stateless, time-boxed OAuth CSRF token: no server-side session, no new
-// secret -- reuses TOKEN_ENCRYPTION_KEY (already high-entropy, already a
-// Worker secret) purely as an HMAC key here, unrelated to its AES use in
-// security.ts.
-export async function signState(timestampMs: number, key: string): Promise<string> {
-  const timestampPart = bytesToBase64Url(new TextEncoder().encode(String(timestampMs)));
-  const mac = await hmacSha256(String(timestampMs), key);
-  return `${timestampPart}.${bytesToBase64Url(mac)}`;
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
-async function verifyState(state: string, key: string): Promise<boolean> {
+/**
+ * Stateless, time-boxed OAuth CSRF token -- no server-side session, no new
+ * secret (reuses TOKEN_ENCRYPTION_KEY, already high-entropy and already a
+ * Worker secret, purely as an HMAC key here, unrelated to its AES use in
+ * security.ts).
+ *
+ * [Final review I2] An HMAC over just a timestamp proves only that this
+ * server issued the state recently -- it says nothing about which browser
+ * started the flow, since /connect is public and unauthenticated. Without
+ * a browser binding, an attacker can run /connect themselves, consent
+ * with their own Google account, and hand a victim (or the API directly)
+ * a fully valid state+code pair that replaces the victim's Gmail
+ * connection with the attacker's. Binding the state to a random nonce
+ * that only travels in an HttpOnly cookie (double-submit pattern) ties
+ * the state to the browser that received it, without any server-side
+ * session storage.
+ */
+export async function signState(timestampMs: number, nonce: string, key: string): Promise<string> {
+  const timestampPart = bytesToBase64Url(new TextEncoder().encode(String(timestampMs)));
+  const noncePart = bytesToBase64Url(new TextEncoder().encode(nonce));
+  const mac = await hmacSha256(`${timestampMs}.${nonce}`, key);
+  return `${timestampPart}.${noncePart}.${bytesToBase64Url(mac)}`;
+}
+
+async function verifyState(state: string, cookieNonce: string | undefined, key: string): Promise<boolean> {
+  if (!cookieNonce) return false;
+
   const parts = state.split(".");
-  if (parts.length !== 2) return false;
-  const [timestampPart, macPart] = parts;
+  if (parts.length !== 3) return false;
+  const [timestampPart, noncePart, macPart] = parts;
 
   let timestampMs: number;
+  let nonce: string;
   try {
     const padded = timestampPart.replace(/-/g, "+").replace(/_/g, "/");
     timestampMs = Number(atob(padded));
+    nonce = new TextDecoder().decode(Uint8Array.from(atob(noncePart.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)));
   } catch {
     return false;
   }
   if (!Number.isFinite(timestampMs)) return false;
+  if (!timingSafeEqual(nonce, cookieNonce)) return false;
 
-  const expected = await signState(timestampMs, key);
-  if (expected !== `${timestampPart}.${macPart}`) return false;
+  const expected = await signState(timestampMs, nonce, key);
+  if (!timingSafeEqual(expected, `${timestampPart}.${noncePart}.${macPart}`)) return false;
 
   return Date.now() - timestampMs <= STATE_MAX_AGE_MS;
 }
@@ -73,13 +105,24 @@ function consentUrl(clientId: string, redirectUri: string, state: string): strin
   return url.toString();
 }
 
-async function redirectToConsent(c: { env: Env }) {
+async function redirectToConsent(c: Context<{ Bindings: Env }>) {
   const config = loadConfig(c.env);
-  const state = await signState(Date.now(), config.tokenEncryptionKey);
-  return new Response(null, {
-    status: 302,
-    headers: { Location: consentUrl(config.gmailClientId, config.gmailRedirectUri, state) },
+  const nonce = randomNonce();
+  const state = await signState(Date.now(), nonce, config.tokenEncryptionKey);
+
+  setCookie(c, NONCE_COOKIE_NAME, nonce, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    maxAge: STATE_MAX_AGE_MS / 1000,
+    path: "/auth/gmail",
   });
+
+  // setCookie writes its header onto c.res -- returning a brand-new
+  // Response here (rather than c.body/c.redirect) would discard it, so
+  // the redirect is built through the context too.
+  c.header("Location", consentUrl(config.gmailClientId, config.gmailRedirectUri, state));
+  return c.body(null, 302);
 }
 
 authGmailRoutes.get("/connect", (c) => redirectToConsent(c));
@@ -89,7 +132,8 @@ authGmailRoutes.get("/callback", async (c) => {
   const config = loadConfig(c.env);
 
   const state = c.req.query("state");
-  if (!state || !(await verifyState(state, config.tokenEncryptionKey))) {
+  const cookieNonce = getCookie(c, NONCE_COOKIE_NAME);
+  if (!state || !(await verifyState(state, cookieNonce, config.tokenEncryptionKey))) {
     return c.text("Missing or invalid state parameter", 400);
   }
 

@@ -18,12 +18,26 @@ const testEnv = {
   NOTIFICATION_EMAIL: "user@example.com",
 };
 
-// Every real callback goes through /connect first to get a signed state --
-// tests that aren't specifically about the state check itself thread a
-// real one through so they keep testing what they originally tested.
-async function freshState(): Promise<string> {
+function cookieHeaderFrom(connectRes: Response): string {
+  // Hono test requests don't carry a cookie jar across calls like a real
+  // browser -- extract the Set-Cookie's name=value pair and forward it
+  // explicitly on the next request, exactly as a browser would.
+  const setCookie = connectRes.headers.get("Set-Cookie")!;
+  return setCookie.split(";")[0];
+}
+
+// Every real callback goes through /connect first to get a signed state
+// AND its matching nonce cookie -- tests that aren't specifically about
+// the state/nonce check itself thread a real one through so they keep
+// testing what they originally tested.
+async function freshFlow(): Promise<{ state: string; cookie: string }> {
   const res = await authGmailRoutes.request("/connect", {}, testEnv);
-  return new URL(res.headers.get("Location")!).searchParams.get("state")!;
+  const state = new URL(res.headers.get("Location")!).searchParams.get("state")!;
+  return { state, cookie: cookieHeaderFrom(res) };
+}
+
+function callback(query: string, cookie?: string) {
+  return authGmailRoutes.request(`/callback?${query}`, cookie ? { headers: { Cookie: cookie } } : {}, testEnv);
 }
 
 describe("authGmail routes", () => {
@@ -49,31 +63,59 @@ describe("authGmail routes", () => {
     expect(location.searchParams.get("state")).toBeTruthy();
   });
 
-  test("GET /callback with no state parameter is rejected, not silently accepted", async () => {
+  // [Final review I2] /connect is public and unauthenticated, so an HMAC
+  // over just a timestamp proves only "this server issued it recently" --
+  // not "this browser started the flow". Without a browser-bound nonce, an
+  // attacker can run /connect themselves, consent with their own Google
+  // account, and hand the victim (or the API) a fully valid state+code
+  // pair that replaces the victim's Gmail connection with the attacker's.
+  test("[I2] GET /connect sets an HttpOnly nonce cookie alongside the state parameter", async () => {
+    const res = await authGmailRoutes.request("/connect", {}, testEnv);
+    const setCookie = res.headers.get("Set-Cookie");
+    expect(setCookie).toBeTruthy();
+    expect(setCookie).toContain("HttpOnly");
+  });
+
+  test("[I2] GET /callback with a valid, fresh state but no nonce cookie is rejected", async () => {
     vi.stubGlobal("fetch", vi.fn());
-    const res = await authGmailRoutes.request("/callback?code=fake-code", {}, testEnv);
+    const { state } = await freshFlow();
+
+    const res = await callback(`code=fake-code&state=${encodeURIComponent(state)}`);
+
+    expect(res.status).toBe(400);
+  });
+
+  test("[I2] GET /callback with a state from a different /connect call than the cookie is rejected", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const flowA = await freshFlow();
+    const flowB = await freshFlow();
+
+    // The attack this closes: an attacker's own /connect+/callback state
+    // (flowA) replayed against a victim's browser, which only carries its
+    // own nonce cookie (flowB's).
+    const res = await callback(`code=fake-code&state=${encodeURIComponent(flowA.state)}`, flowB.cookie);
+
     expect(res.status).toBe(400);
   });
 
   test("GET /callback with a tampered state parameter is rejected", async () => {
     vi.stubGlobal("fetch", vi.fn());
-    const connectRes = await authGmailRoutes.request("/connect", {}, testEnv);
-    const state = new URL(connectRes.headers.get("Location")!).searchParams.get("state")!;
+    const { state, cookie } = await freshFlow();
     const tampered = state.slice(0, -1) + (state.endsWith("A") ? "B" : "A");
 
-    const res = await authGmailRoutes.request(`/callback?code=fake-code&state=${tampered}`, {}, testEnv);
+    const res = await callback(`code=fake-code&state=${tampered}`, cookie);
 
     expect(res.status).toBe(400);
   });
 
-  test("GET /callback with a valid, fresh state succeeds", async () => {
+  test("GET /callback with a valid, fresh state and matching cookie succeeds", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ access_token: "a", refresh_token: "r", expires_in: 3600 }), { status: 200 }))
     );
-    const state = await freshState();
+    const { state, cookie } = await freshFlow();
 
-    const res = await authGmailRoutes.request(`/callback?code=fake-code&state=${encodeURIComponent(state)}`, {}, testEnv);
+    const res = await callback(`code=fake-code&state=${encodeURIComponent(state)}`, cookie);
 
     expect(res.status).toBe(200);
   });
@@ -81,9 +123,10 @@ describe("authGmail routes", () => {
   test("GET /callback with an expired (>10 minutes old) state is rejected", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const { signState } = await import("../src/routes/authGmail");
-    const staleState = await signState(Date.now() - 11 * 60 * 1000, testEnv.TOKEN_ENCRYPTION_KEY);
+    const nonce = "test-nonce";
+    const staleState = await signState(Date.now() - 11 * 60 * 1000, nonce, testEnv.TOKEN_ENCRYPTION_KEY);
 
-    const res = await authGmailRoutes.request(`/callback?code=fake-code&state=${encodeURIComponent(staleState)}`, {}, testEnv);
+    const res = await callback(`code=fake-code&state=${encodeURIComponent(staleState)}`, `gmail_oauth_nonce=${nonce}`);
 
     expect(res.status).toBe(400);
   });
@@ -104,8 +147,8 @@ describe("authGmail routes", () => {
       )
     );
 
-    const state = await freshState();
-    const res = await authGmailRoutes.request(`/callback?code=fake-auth-code&state=${encodeURIComponent(state)}`, {}, testEnv);
+    const { state, cookie } = await freshFlow();
+    const res = await callback(`code=fake-auth-code&state=${encodeURIComponent(state)}`, cookie);
     expect(res.status).toBe(200);
 
     const db = drizzle(env.DB);
@@ -130,8 +173,8 @@ describe("authGmail routes", () => {
           )
       )
     );
-    const state1 = await freshState();
-    await authGmailRoutes.request(`/callback?code=first-code&state=${encodeURIComponent(state1)}`, {}, testEnv);
+    const flow1 = await freshFlow();
+    await callback(`code=first-code&state=${encodeURIComponent(flow1.state)}`, flow1.cookie);
 
     vi.stubGlobal(
       "fetch",
@@ -147,8 +190,8 @@ describe("authGmail routes", () => {
           )
       )
     );
-    const state2 = await freshState();
-    await authGmailRoutes.request(`/callback?code=second-code&state=${encodeURIComponent(state2)}`, {}, testEnv);
+    const flow2 = await freshFlow();
+    await callback(`code=second-code&state=${encodeURIComponent(flow2.state)}`, flow2.cookie);
 
     const db = drizzle(env.DB);
     const rows = await db.select().from(gmailCredentials);
@@ -161,9 +204,9 @@ describe("authGmail routes", () => {
   test("a callback with no code param fails clearly instead of calling the token endpoint", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const state = await freshState();
+    const { state, cookie } = await freshFlow();
 
-    const res = await authGmailRoutes.request(`/callback?state=${encodeURIComponent(state)}`, {}, testEnv);
+    const res = await callback(`state=${encodeURIComponent(state)}`, cookie);
 
     expect(res.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -180,8 +223,8 @@ describe("authGmail routes", () => {
           )
       )
     );
-    const state1 = await freshState();
-    await authGmailRoutes.request(`/callback?code=good-code&state=${encodeURIComponent(state1)}`, {}, testEnv);
+    const flow1 = await freshFlow();
+    await callback(`code=good-code&state=${encodeURIComponent(flow1.state)}`, flow1.cookie);
     const db = drizzle(env.DB);
     const [before] = await db.select().from(gmailCredentials);
 
@@ -189,8 +232,8 @@ describe("authGmail routes", () => {
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }))
     );
-    const state2 = await freshState();
-    const res = await authGmailRoutes.request(`/callback?code=bad-code&state=${encodeURIComponent(state2)}`, {}, testEnv);
+    const flow2 = await freshFlow();
+    const res = await callback(`code=bad-code&state=${encodeURIComponent(flow2.state)}`, flow2.cookie);
 
     expect(res.status).toBe(502);
     const [after] = await db.select().from(gmailCredentials);
@@ -204,9 +247,9 @@ describe("authGmail routes", () => {
         async () => new Response(JSON.stringify({ refresh_token: "r", expires_in: 3600 }), { status: 200 })
       )
     );
-    const state = await freshState();
+    const { state, cookie } = await freshFlow();
 
-    const res = await authGmailRoutes.request(`/callback?code=weird-code&state=${encodeURIComponent(state)}`, {}, testEnv);
+    const res = await callback(`code=weird-code&state=${encodeURIComponent(state)}`, cookie);
 
     expect(res.status).toBe(502);
     const db = drizzle(env.DB);
@@ -222,9 +265,9 @@ describe("authGmail routes", () => {
           new Response(JSON.stringify({ access_token: "a", refresh_token: "r" }), { status: 200 })
       )
     );
-    const state = await freshState();
+    const { state, cookie } = await freshFlow();
 
-    const res = await authGmailRoutes.request(`/callback?code=weird-code&state=${encodeURIComponent(state)}`, {}, testEnv);
+    const res = await callback(`code=weird-code&state=${encodeURIComponent(state)}`, cookie);
 
     expect(res.status).toBe(502);
   });
@@ -240,8 +283,8 @@ describe("authGmail routes", () => {
           )
       )
     );
-    const state1 = await freshState();
-    await authGmailRoutes.request(`/callback?code=first&state=${encodeURIComponent(state1)}`, {}, testEnv);
+    const flow1 = await freshFlow();
+    await callback(`code=first&state=${encodeURIComponent(flow1.state)}`, flow1.cookie);
 
     vi.stubGlobal(
       "fetch",
@@ -250,8 +293,8 @@ describe("authGmail routes", () => {
           new Response(JSON.stringify({ access_token: "renewed-access", expires_in: 3600 }), { status: 200 })
       )
     );
-    const state2 = await freshState();
-    const res = await authGmailRoutes.request(`/callback?code=second&state=${encodeURIComponent(state2)}`, {}, testEnv);
+    const flow2 = await freshFlow();
+    const res = await callback(`code=second&state=${encodeURIComponent(flow2.state)}`, flow2.cookie);
 
     expect(res.status).toBe(200);
     const db = drizzle(env.DB);
