@@ -33,7 +33,7 @@ describe("transactions routes", () => {
     const res = await transactionsRoutes.request("/", {}, env);
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = (await res.json()) as { date: string }[];
     expect(body).toHaveLength(2);
     expect(body[0].date).toBe("2026-10-27");
     expect(body[1].date).toBe("2026-10-01");
@@ -46,7 +46,7 @@ describe("transactions routes", () => {
 
     const res = await transactionsRoutes.request("/?reviewStatus=pending_review", {}, env);
 
-    const body = await res.json();
+    const body = (await res.json()) as { reviewStatus: string }[];
     expect(body).toHaveLength(1);
     expect(body[0].reviewStatus).toBe("pending_review");
   });
@@ -58,7 +58,8 @@ describe("transactions routes", () => {
     const res = await transactionsRoutes.request(`/${row.id}`, {}, env);
 
     expect(res.status).toBe(200);
-    expect((await res.json()).id).toBe(row.id);
+    const body = (await res.json()) as { id: number };
+    expect(body.id).toBe(row.id);
   });
 
   test("GET /:id for a nonexistent id returns 404", async () => {
@@ -91,5 +92,120 @@ describe("transactions routes", () => {
       env
     );
     expect(res.status).toBe(404);
+  });
+
+  async function seedDedupPair(db: ReturnType<typeof drizzle>) {
+    const groupId = "test-group-1";
+    const [a] = await db
+      .insert(transactions)
+      .values({
+        amount: 50000,
+        date: "2026-10-27",
+        vendorRaw: "Starbucks",
+        vendorNormalized: "starbucks",
+        category: "Coffee",
+        source: "gmail_email",
+        provenance: "{}",
+        reviewStatus: "committed",
+        dedupGroupId: groupId,
+        dedupResolution: "pending",
+      })
+      .returning();
+    const [b] = await db
+      .insert(transactions)
+      .values({
+        amount: 50000,
+        date: "2026-10-27",
+        vendorRaw: "Starbucks Coffee",
+        vendorNormalized: "starbucks coffee",
+        category: "Coffee",
+        source: "statement_import",
+        provenance: "{}",
+        reviewStatus: "committed",
+        dedupGroupId: groupId,
+        dedupResolution: "pending",
+      })
+      .returning();
+    return { a, b };
+  }
+
+  test("POST /:id/resolve-dedup with action=kept marks this row kept and soft-deletes its counterpart as discarded", async () => {
+    const db = drizzle(env.DB);
+    const { a, b } = await seedDedupPair(db);
+
+    const res = await transactionsRoutes.request(
+      `/${a.id}/resolve-dedup`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "kept" }) },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const [updatedA] = await db.select().from(transactions).where(eq(transactions.id, a.id));
+    const [updatedB] = await db.select().from(transactions).where(eq(transactions.id, b.id));
+    expect(updatedA.dedupResolution).toBe("kept");
+    expect(updatedA.deletedAt).toBeNull();
+    expect(updatedB.dedupResolution).toBe("discarded");
+    expect(updatedB.deletedAt).not.toBeNull();
+  });
+
+  test("POST /:id/resolve-dedup with action=discarded soft-deletes this row and marks its counterpart kept", async () => {
+    const db = drizzle(env.DB);
+    const { a, b } = await seedDedupPair(db);
+
+    await transactionsRoutes.request(
+      `/${a.id}/resolve-dedup`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "discarded" }) },
+      env
+    );
+
+    const [updatedA] = await db.select().from(transactions).where(eq(transactions.id, a.id));
+    const [updatedB] = await db.select().from(transactions).where(eq(transactions.id, b.id));
+    expect(updatedA.dedupResolution).toBe("discarded");
+    expect(updatedA.deletedAt).not.toBeNull();
+    expect(updatedB.dedupResolution).toBe("kept");
+  });
+
+  test("POST /:id/resolve-dedup with action=confirmed_distinct marks both rows confirmed_distinct and deletes neither", async () => {
+    const db = drizzle(env.DB);
+    const { a, b } = await seedDedupPair(db);
+
+    await transactionsRoutes.request(
+      `/${a.id}/resolve-dedup`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "confirmed_distinct" }) },
+      env
+    );
+
+    const [updatedA] = await db.select().from(transactions).where(eq(transactions.id, a.id));
+    const [updatedB] = await db.select().from(transactions).where(eq(transactions.id, b.id));
+    expect(updatedA.dedupResolution).toBe("confirmed_distinct");
+    expect(updatedA.deletedAt).toBeNull();
+    expect(updatedB.dedupResolution).toBe("confirmed_distinct");
+    expect(updatedB.deletedAt).toBeNull();
+  });
+
+  test("POST /:id/resolve-dedup on a transaction with no dedup_group_id returns 400, not a crash", async () => {
+    const db = drizzle(env.DB);
+    const row = await seed(db); // no dedupGroupId
+
+    const res = await transactionsRoutes.request(
+      `/${row.id}/resolve-dedup`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "kept" }) },
+      env
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  test("POST /:id/resolve-dedup with an invalid action returns 400", async () => {
+    const db = drizzle(env.DB);
+    const { a } = await seedDedupPair(db);
+
+    const res = await transactionsRoutes.request(
+      `/${a.id}/resolve-dedup`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "maybe" }) },
+      env
+    );
+
+    expect(res.status).toBe(400);
   });
 });

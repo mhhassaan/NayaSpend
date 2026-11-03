@@ -17,7 +17,7 @@ describe("missedTransactions routes", () => {
     );
 
     expect(res.status).toBe(201);
-    const body = await res.json();
+    const body = (await res.json()) as { id: number; category: string };
     expect(body.id).toBeTypeOf("number");
     const db = drizzle(env.DB);
     const rows = await db.select().from(transactions);
