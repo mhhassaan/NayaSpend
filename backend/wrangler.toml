@@ -1,0 +1,20 @@
+name = "nayaspend-backend"
+main = "src/index.ts"
+compatibility_date = "2025-02-04"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nayaspend"
+database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
+
+# Three Cron Triggers, all currently dispatching to the placeholder
+# `scheduled` export in src/index.ts (Task 1, Step 5). Each will be wired
+# to its real handler (captureScheduler, watchdog, budget/bill evaluation)
+# in later build phases, per the design doc's Detailed Implementation Plan
+# item 1 and item 26.
+[triggers]
+crons = [
+  "0 * * * *",    # hourly: Capture Scheduler
+  "30 * * * *",   # hourly, offset 30 min: Watchdog
+  "0 */6 * * *",  # every 6 hours: budget/bill evaluation
+]
