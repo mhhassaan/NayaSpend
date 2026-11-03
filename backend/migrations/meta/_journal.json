@@ -22,6 +22,13 @@
       "when": 1793671091435,
       "tag": "0002_statement_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793716466527,
+      "tag": "0003_budget_bill_alert_state",
+      "breakpoints": true
     }
   ]
 }
