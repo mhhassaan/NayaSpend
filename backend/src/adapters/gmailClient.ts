@@ -1,8 +1,34 @@
 // Sender/subject-scoped Gmail query. The exact subject phrase is
 // provisional pending real NayaPay email samples (see the plan's
 // Plan-Level Rulings) -- this is the one place that restriction is
-// defined, so every caller stays auditable against it.
+// defined. listMessages always uses this internally (it takes no query
+// parameter), so there is no code path that can issue an unscoped read.
 export const NAYAPAY_QUERY = 'from:nayapay.com subject:"You spent"';
+
+export type GmailErrorType = "auth_failure" | "rate_limit" | "network_timeout" | "unknown";
+
+export class GmailApiError extends Error {
+  readonly status: number;
+  readonly errorType: GmailErrorType;
+
+  constructor(status: number, errorType: GmailErrorType, message: string) {
+    super(message);
+    this.name = "GmailApiError";
+    this.status = status;
+    this.errorType = errorType;
+  }
+}
+
+function classifyStatus(status: number): GmailErrorType {
+  if (status === 401 || status === 403) return "auth_failure";
+  if (status === 429) return "rate_limit";
+  return "unknown";
+}
+
+async function throwForFailedResponse(response: Response): Promise<never> {
+  const errorType = classifyStatus(response.status);
+  throw new GmailApiError(response.status, errorType, `Gmail API request failed with status ${response.status}`);
+}
 
 export type GmailMessageSummary = { id: string };
 
@@ -17,8 +43,8 @@ export type GmailMessage = {
 
 export type GmailClient = {
   listMessages(
-    query: string,
-    pageToken?: string
+    pageToken: string | undefined,
+    maxResults: number
   ): Promise<{ messages: GmailMessageSummary[]; nextPageToken?: string }>;
   getMessage(id: string): Promise<GmailMessage>;
 };
@@ -32,7 +58,7 @@ function base64UrlToText(data: string): string {
 }
 
 function findHeader(headers: { name: string; value: string }[], name: string): string {
-  return headers.find((h) => h.name === name)?.value ?? "";
+  return headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? "";
 }
 
 function findPlainTextBody(payload: {
@@ -53,12 +79,15 @@ export function createGmailClient(accessToken: string): GmailClient {
   const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
   return {
-    async listMessages(query, pageToken) {
+    async listMessages(pageToken, maxResults) {
       const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-      url.searchParams.set("q", query);
+      url.searchParams.set("q", NAYAPAY_QUERY);
+      url.searchParams.set("maxResults", String(maxResults));
       if (pageToken) url.searchParams.set("pageToken", pageToken);
 
       const response = await fetch(url.toString(), { headers: authHeaders });
+      if (!response.ok) await throwForFailedResponse(response);
+
       const json = (await response.json()) as {
         messages?: GmailMessageSummary[];
         nextPageToken?: string;
@@ -68,9 +97,11 @@ export function createGmailClient(accessToken: string): GmailClient {
 
     async getMessage(id) {
       const response = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`,
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}`,
         { headers: authHeaders }
       );
+      if (!response.ok) await throwForFailedResponse(response);
+
       const json = (await response.json()) as {
         id: string;
         threadId: string;

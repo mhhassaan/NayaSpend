@@ -27,6 +27,11 @@ export const transactions = sqliteTable("transactions", {
   // One of: pending | kept | discarded | confirmed_distinct
   dedupResolution: text("dedup_resolution"),
   deletedAt: text("deleted_at"),
+  // Idempotency key for gmail_email rows only (SQLite permits multiple
+  // NULLs under UNIQUE, so this is safe for other sources). Re-inserting
+  // the same Gmail message (e.g. a retried/resumed backfill chunk) is a
+  // no-op via onConflictDoNothing rather than a duplicate transaction.
+  gmailMessageId: text("gmail_message_id").unique(),
 }, (table) => ({
   amountIsInteger: check(
     "amount_is_integer",
@@ -43,6 +48,11 @@ export const captureRuns = sqliteTable("capture_runs", {
   // One of: auth_failure | rate_limit | network_timeout | unknown
   errorType: text("error_type"),
   backfillPageToken: text("backfill_page_token"),
+  // Set once Gmail reports no further backfill pages. Distinguishes
+  // "backfill finished" from "backfill never started" -- both would
+  // otherwise leave backfillPageToken null, causing a finished backfill
+  // to silently restart from page one on the next call.
+  backfillCompletedAt: text("backfill_completed_at"),
   pollingHistoryId: text("polling_history_id"),
 });
 

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { loadConfig } from "../config";
 import { gmailCredentials } from "../db/schema";
-import { encryptToken } from "../security";
+import { decryptToken, encryptToken } from "../security";
 
 type Env = {
   DB: D1Database;
@@ -63,17 +63,40 @@ authGmailRoutes.get("/callback", async (c) => {
   }
 
   const tokenJson = (await tokenResponse.json()) as {
-    access_token: string;
-    refresh_token: string;
-    expires_in: number;
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
   };
 
-  const encryptedAccessToken = await encryptToken(tokenJson.access_token, config.tokenEncryptionKey);
-  const encryptedRefreshToken = await encryptToken(tokenJson.refresh_token, config.tokenEncryptionKey);
-  const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
+  // Google's token response isn't guaranteed to be well-formed from our
+  // side's perspective -- validate before encrypting/storing anything, so
+  // a malformed response can never overwrite a working credential with a
+  // broken one (e.g. an empty access token, or a NaN expiry).
+  if (!tokenJson.access_token) {
+    return c.text("Gmail token exchange response is missing access_token", 502);
+  }
+  if (typeof tokenJson.expires_in !== "number" || !Number.isFinite(tokenJson.expires_in)) {
+    return c.text("Gmail token exchange response is missing a valid expires_in", 502);
+  }
 
   const db = drizzle(c.env.DB);
   const [existing] = await db.select().from(gmailCredentials);
+
+  // Google omits refresh_token on some reconnects (it only issues a new
+  // one when the user re-consents) -- keep the existing one rather than
+  // overwriting it with an empty value.
+  let refreshTokenToStore: string;
+  if (tokenJson.refresh_token) {
+    refreshTokenToStore = tokenJson.refresh_token;
+  } else if (existing) {
+    refreshTokenToStore = await decryptToken(existing.encryptedRefreshToken, config.tokenEncryptionKey);
+  } else {
+    return c.text("Gmail token exchange response is missing refresh_token for a first-time connection", 502);
+  }
+
+  const encryptedAccessToken = await encryptToken(tokenJson.access_token, config.tokenEncryptionKey);
+  const encryptedRefreshToken = await encryptToken(refreshTokenToStore, config.tokenEncryptionKey);
+  const expiresAt = new Date(Date.now() + tokenJson.expires_in * 1000).toISOString();
 
   if (existing) {
     await db
