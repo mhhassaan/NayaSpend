@@ -1,13 +1,12 @@
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { captureRuns, gmailCredentials } from "./db/schema";
-import { createGmailClient, GmailApiError } from "./adapters/gmailClient";
+import { captureRuns } from "./db/schema";
+import { GmailApiError } from "./adapters/gmailClient";
 import { runCaptureScheduler } from "./services/captureScheduler";
 import { checkCaptureHealth } from "./services/watchdog";
-import { refreshAccessToken } from "./services/gmailTokenRefresh";
-import { loadConfig, type ConfigEnv } from "./config";
-import { decryptToken, encryptToken } from "./security";
+import { getGmailClient } from "./services/gmailCredentialStore";
+import type { ConfigEnv } from "./config";
 import { transactionsRoutes } from "./routes/transactions";
 import { missedTransactionsRoutes } from "./routes/missedTransactions";
 
@@ -18,35 +17,6 @@ type Env = ConfigEnv & {
 
 const CAPTURE_CRON = "0 * * * *";
 const WATCHDOG_CRON = "30 * * * *";
-const TOKEN_EXPIRY_SKEW_MS = 5 * 60 * 1000; // refresh a few minutes before Google would reject it
-
-async function buildGmailClientFromStoredCredentials(env: Env) {
-  const db = drizzle(env.DB);
-  const [credentials] = await db.select().from(gmailCredentials);
-  if (!credentials) return null;
-
-  const config = loadConfig(env);
-  const expiresAt = new Date(credentials.expiresAt).getTime();
-
-  // Google access tokens last ~1 hour -- without this, every poll past
-  // the first would fail with 401 the moment the stored token expires.
-  if (Date.now() >= expiresAt - TOKEN_EXPIRY_SKEW_MS) {
-    const refreshToken = await decryptToken(credentials.encryptedRefreshToken, config.tokenEncryptionKey);
-    const refreshed = await refreshAccessToken(
-      { gmailClientId: config.gmailClientId, gmailClientSecret: config.gmailClientSecret },
-      refreshToken
-    );
-    const encryptedAccessToken = await encryptToken(refreshed.accessToken, config.tokenEncryptionKey);
-    await db
-      .update(gmailCredentials)
-      .set({ encryptedAccessToken, expiresAt: refreshed.expiresAt })
-      .where(eq(gmailCredentials.id, credentials.id));
-    return createGmailClient(refreshed.accessToken);
-  }
-
-  const accessToken = await decryptToken(credentials.encryptedAccessToken, config.tokenEncryptionKey);
-  return createGmailClient(accessToken);
-}
 
 const app = new Hono<{ Bindings: Env }>();
 app.route("/transactions", transactionsRoutes);
@@ -70,7 +40,7 @@ async function recordDispatchFailure(env: Env, err: unknown) {
 async function dispatchCapture(env: Env) {
   let client;
   try {
-    client = await buildGmailClientFromStoredCredentials(env);
+    client = await getGmailClient(drizzle(env.DB), env);
   } catch (err) {
     // A broken refresh (revoked/expired refresh_token, Gmail outage) must
     // still be recorded -- this happens before runCaptureScheduler's own
@@ -124,7 +94,7 @@ export default {
       try {
         let client;
         try {
-          client = await buildGmailClientFromStoredCredentials(env);
+          client = await getGmailClient(db, env);
         } catch (err) {
           await recordDispatchFailure(env, err);
           continue;
