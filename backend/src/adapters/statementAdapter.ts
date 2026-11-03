@@ -2,6 +2,7 @@ import Papa from "papaparse";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { transactions } from "../db/schema";
 import { categorize, normalize } from "../services/categorizationEngine";
+import { runDedupCheck } from "../services/dedupEngine";
 
 export type ParsedCsvRow =
   | { rowIndex: number; confidence: "high"; amountCents: number; date: string; vendorRaw: string }
@@ -72,16 +73,20 @@ export async function importStatementCsv(
   for (const row of rows) {
     if (row.confidence === "high") {
       const category = await categorize(db, row.vendorRaw);
-      await db.insert(transactions).values({
-        amount: row.amountCents,
-        date: row.date,
-        vendorRaw: row.vendorRaw,
-        vendorNormalized: normalize(row.vendorRaw),
-        category,
-        source: "statement_import",
-        reviewStatus: "committed",
-        provenance: JSON.stringify({ fileRef, rowIndex: row.rowIndex }),
-      });
+      const [inserted] = await db
+        .insert(transactions)
+        .values({
+          amount: row.amountCents,
+          date: row.date,
+          vendorRaw: row.vendorRaw,
+          vendorNormalized: normalize(row.vendorRaw),
+          category,
+          source: "statement_import",
+          reviewStatus: "committed",
+          provenance: JSON.stringify({ fileRef, rowIndex: row.rowIndex }),
+        })
+        .returning({ id: transactions.id });
+      await runDedupCheck(db, inserted.id);
     } else {
       await db.insert(transactions).values({
         amount: 0,

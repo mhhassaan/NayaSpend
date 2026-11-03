@@ -63,4 +63,43 @@ describe("importStatementCsv", () => {
     expect(provenance.rowIndex).toBe(1);
     expect(provenance.quarantineReason).toBeDefined();
   });
+
+  test("a committed CSV row is dedup-checked against an existing gmail_email transaction", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(transactions).values({
+      amount: 125000,
+      date: "2026-10-27",
+      vendorRaw: "Starbucks",
+      vendorNormalized: "starbucks",
+      category: "Coffee",
+      source: "gmail_email",
+      provenance: "{}",
+      reviewStatus: "committed",
+    });
+
+    const singleRowCsv = `Date,Description,Amount\n2026-10-27,Starbucks Coffee,1250.00\n`;
+    await importStatementCsv(db, singleRowCsv, "file-dedup");
+
+    const [stmtRow] = await db.select().from(transactions).where(eq(transactions.source, "statement_import"));
+    expect(stmtRow.dedupGroupId).not.toBeNull();
+  });
+
+  test("a quarantined CSV row is never dedup-checked", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(transactions).values({
+      amount: 0,
+      date: "2026-10-27",
+      vendorRaw: "(unrecognized)",
+      vendorNormalized: "(unrecognized)",
+      category: "Uncategorized",
+      source: "gmail_email",
+      provenance: "{}",
+      reviewStatus: "committed",
+    });
+
+    await importStatementCsv(db, unrecognizedColumnsCsv, "file-unrec");
+
+    const [stmtRow] = await db.select().from(transactions).where(eq(transactions.source, "statement_import"));
+    expect(stmtRow.dedupGroupId).toBeNull();
+  });
 });
