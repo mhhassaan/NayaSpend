@@ -1,0 +1,130 @@
+import { describe, expect, test, vi } from "vitest";
+import { createGmailClient, GmailApiError, NAYAPAY_QUERY } from "../src/adapters/gmailClient";
+
+function base64url(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+describe("createGmailClient", () => {
+  test("listMessages always uses the sender/subject query string internally -- there is no way to pass a different one", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.get("q")).toBe(NAYAPAY_QUERY);
+      return new Response(JSON.stringify({ messages: [{ id: "m1" }], nextPageToken: "tok2" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = createGmailClient("fake-access-token");
+    const result = await client.listMessages("tok1", 50);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(result.messages).toEqual([{ id: "m1" }]);
+    expect(result.nextPageToken).toBe("tok2");
+  });
+
+  test("listMessages passes maxResults through so a full page is never silently truncated", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.get("maxResults")).toBe("50");
+      return new Response(JSON.stringify({ messages: [] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = createGmailClient("fake-access-token");
+    await client.listMessages(undefined, 50);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  test("listMessages throws a typed GmailApiError with errorType 'auth_failure' on a 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "invalid_token" }), { status: 401 }))
+    );
+    const client = createGmailClient("expired-token");
+
+    await expect(client.listMessages(undefined, 50)).rejects.toMatchObject({
+      errorType: "auth_failure",
+    });
+  });
+
+  test("listMessages throws a typed GmailApiError with errorType 'rate_limit' on a 429", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "rate limited" }), { status: 429 }))
+    );
+    const client = createGmailClient("fake-access-token");
+
+    await expect(client.listMessages(undefined, 50)).rejects.toMatchObject({
+      errorType: "rate_limit",
+    });
+  });
+
+  test("getMessage throws a typed GmailApiError (not a generic TypeError) on a non-ok response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "not found" }), { status: 404 }))
+    );
+    const client = createGmailClient("fake-access-token");
+
+    await expect(client.getMessage("missing-id")).rejects.toBeInstanceOf(GmailApiError);
+  });
+
+  test("getMessage parses subject, sender, and plain-text body from the Gmail API response shape", async () => {
+    const fetchSpy = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "m1",
+          threadId: "t1",
+          internalDate: "1730000000000",
+          payload: {
+            headers: [
+              { name: "Subject", value: "You spent PKR 500" },
+              { name: "From", value: "NayaPay <noreply@nayapay.com>" },
+            ],
+            body: { data: base64url("Transaction body text") },
+          },
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = createGmailClient("fake-access-token");
+    const message = await client.getMessage("m1");
+
+    expect(message.subject).toBe("You spent PKR 500");
+    expect(message.from).toBe("NayaPay <noreply@nayapay.com>");
+    expect(message.bodyText).toBe("Transaction body text");
+  });
+
+  test("getMessage decodes a multipart message's first text/plain part", async () => {
+    const fetchSpy = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "m2",
+          threadId: "t2",
+          internalDate: "1730000000000",
+          payload: {
+            headers: [
+              { name: "Subject", value: "You spent Rs. 100" },
+              { name: "From", value: "NayaPay <noreply@nayapay.com>" },
+            ],
+            parts: [
+              { mimeType: "text/html", body: { data: base64url("<p>html</p>") } },
+              { mimeType: "text/plain", body: { data: base64url("Plain part body") } },
+            ],
+          },
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = createGmailClient("fake-access-token");
+    const message = await client.getMessage("m2");
+
+    expect(message.bodyText).toBe("Plain part body");
+  });
+});

@@ -6,6 +6,10 @@ GMAIL_CLIENT_ID=your-gmail-oauth-client-id
 # Gmail OAuth client secret, from the same credentials page.
 GMAIL_CLIENT_SECRET=your-gmail-oauth-client-secret
 
+# The redirect URI registered for this OAuth client in the Google Cloud
+# Console, e.g. http://localhost:8787/auth/gmail/callback for local dev.
+GMAIL_REDIRECT_URI=http://localhost:8787/auth/gmail/callback
+
 # Resend API key (https://resend.com), used for outbound email notifications.
 RESEND_API_KEY=your-resend-api-key
 

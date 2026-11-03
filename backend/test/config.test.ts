@@ -5,10 +5,11 @@ import { loadConfig } from "../src/config";
 const VALID_KEY = btoa("test-key-32-bytes-long-exactly!!");
 
 describe("loadConfig", () => {
-  test("reads all four required secrets", () => {
+  test("reads all five required secrets", () => {
     const env = {
       GMAIL_CLIENT_ID: "a",
       GMAIL_CLIENT_SECRET: "b",
+      GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: VALID_KEY,
     };
@@ -16,6 +17,7 @@ describe("loadConfig", () => {
     expect(config).toEqual({
       gmailClientId: "a",
       gmailClientSecret: "b",
+      gmailRedirectUri: "https://example.com/auth/gmail/callback",
       resendApiKey: "c",
       tokenEncryptionKey: VALID_KEY,
     });
@@ -30,6 +32,7 @@ describe("loadConfig", () => {
     const env = {
       GMAIL_CLIENT_ID: "a",
       GMAIL_CLIENT_SECRET: "b",
+      GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: "   ",
     };
@@ -40,6 +43,7 @@ describe("loadConfig", () => {
     const env = {
       GMAIL_CLIENT_ID: "a",
       GMAIL_CLIENT_SECRET: "b",
+      GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: "ZGQ=", // decodes to 2 bytes, not 32
     };
@@ -50,6 +54,7 @@ describe("loadConfig", () => {
     const env = {
       GMAIL_CLIENT_ID: "a",
       GMAIL_CLIENT_SECRET: "b",
+      GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: "your-base64-encoded-32-byte-key", // placeholder-shaped, not valid base64
     };
