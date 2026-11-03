@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { captureRuns, transactions } from "../src/db/schema";
 import { runBackfill } from "../src/adapters/gmailAdapter";
 import { parseNayaPayEmail } from "../src/adapters/parseNayaPayEmail";
@@ -353,5 +353,27 @@ describe("runBackfill", () => {
 
     const [gmailRow] = await db.select().from(transactions).where(eq(transactions.source, "gmail_email"));
     expect(gmailRow.dedupGroupId).toBeNull();
+  });
+
+  test("[I2] a dedup check that throws does not crash the whole chunk or lose the already-committed rows", async () => {
+    const db = drizzle(env.DB);
+    const dedupEngine = await import("../src/services/dedupEngine");
+    const spy = vi.spyOn(dedupEngine, "runDedupCheck").mockRejectedValueOnce(new Error("simulated D1 blip"));
+
+    const client = fakeClient(
+      { first: { messages: [{ id: "m-clean" }] } },
+      { "m-clean": cleanTransactionEmail }
+    );
+
+    const result = await runBackfill(db, client);
+
+    expect(result.processed).toBe(1); // the row still landed
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reviewStatus).toBe("committed");
+    const [run] = await db.select().from(captureRuns);
+    expect(run.runStatus).toBe("success"); // the chunk itself still succeeded
+
+    spy.mockRestore();
   });
 });

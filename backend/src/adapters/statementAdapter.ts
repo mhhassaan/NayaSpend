@@ -11,6 +11,15 @@ export type ParsedCsvRow =
 const DATE_HEADER_PATTERN = /date/i;
 const VENDOR_HEADER_PATTERN = /desc|memo|vendor|merchant/i;
 const AMOUNT_HEADER_PATTERN = /amount|debit|credit/i;
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+// Strict on purpose: after stripping currency symbols/commas/parens, what
+// remains must be exactly an optionally-signed number with at most 2
+// decimal places. This rejects "12abc", "1.2.3", a trailing "-" or "DR"/
+// "CR" suffix, and 3+ decimal digits -- all of which `parseFloat` alone
+// would accept by ignoring trailing garbage, silently committing a wrong
+// amount instead of quarantining it.
+const STRICT_AMOUNT_PATTERN = /^-?\d+(\.\d{1,2})?$/;
 
 function findHeader(headers: string[], pattern: RegExp): string | undefined {
   return headers.find((h) => pattern.test(h));
@@ -19,14 +28,24 @@ function findHeader(headers: string[], pattern: RegExp): string | undefined {
 function parseAmountToCents(raw: string): number | null {
   const trimmed = raw.trim();
   const isParenthesized = /^\(.*\)$/.test(trimmed);
-  const unwrapped = trimmed.replace(/[()]/g, "");
-  const cleaned = unwrapped.replace(/[$,]/g, "").replace(/\b(Rs\.?|PKR)\b/gi, "").trim();
+  const unwrapped = trimmed.replace(/[()]/g, "").trim();
+  // Currency markers only ever appear as a prefix in the formats this
+  // adapter claims to support ("Rs. 1,250.00", "PKR 500") -- stripping
+  // them as a prefix (rather than a bare \b-bounded substring, which
+  // fails to match "Rs." immediately before a space) handles the actual
+  // NayaPay/bank notation.
+  const withoutCurrency = unwrapped.replace(/^(Rs\.?|PKR)\s*/i, "").replace(/[$,]/g, "");
 
-  const value = Number.parseFloat(cleaned);
-  if (!Number.isFinite(value)) return null;
+  if (!STRICT_AMOUNT_PATTERN.test(withoutCurrency)) return null;
 
+  const value = Number.parseFloat(withoutCurrency);
   const signedValue = isParenthesized ? -Math.abs(value) : value;
   return Math.round(signedValue * 100);
+}
+
+function normalizeIsoDate(raw: string): string | null {
+  const trimmed = raw.trim();
+  return ISO_DATE_PATTERN.test(trimmed) ? trimmed : null;
 }
 
 export function parseStatementCsv(csvText: string, _fileRef: string): ParsedCsvRow[] {
@@ -48,18 +67,31 @@ export function parseStatementCsv(csvText: string, _fileRef: string): ParsedCsvR
     }));
   }
 
+  const rowsWithFieldErrors = new Set(
+    parsed.errors.filter((e) => e.row !== undefined).map((e) => e.row as number)
+  );
+
   return parsed.data.map((row, rowIndex) => {
+    if (rowsWithFieldErrors.has(rowIndex)) {
+      return { rowIndex, confidence: "low" as const, reason: "malformed row (field count mismatch)" };
+    }
+
     const amountCents = parseAmountToCents(row[amountHeader] ?? "");
     if (amountCents === null) {
       return { rowIndex, confidence: "low" as const, reason: "unparseable amount" };
     }
-    return {
-      rowIndex,
-      confidence: "high" as const,
-      amountCents,
-      date: row[dateHeader],
-      vendorRaw: row[vendorHeader],
-    };
+
+    const date = normalizeIsoDate(row[dateHeader] ?? "");
+    if (date === null) {
+      return { rowIndex, confidence: "low" as const, reason: "unparseable date" };
+    }
+
+    const vendorRaw = row[vendorHeader];
+    if (!vendorRaw) {
+      return { rowIndex, confidence: "low" as const, reason: "missing vendor/description" };
+    }
+
+    return { rowIndex, confidence: "high" as const, amountCents, date, vendorRaw };
   });
 }
 
@@ -71,6 +103,11 @@ export async function importStatementCsv(
   const rows = parseStatementCsv(csvText, fileRef);
 
   for (const row of rows) {
+    // Idempotent on (fileRef, rowIndex): re-importing the same file (a
+    // retry after a partial failure, or the user re-uploading the same
+    // statement) inserts nothing for a row already present.
+    const statementRowKey = `${fileRef}:${row.rowIndex}`;
+
     if (row.confidence === "high") {
       const category = await categorize(db, row.vendorRaw);
       const [inserted] = await db
@@ -84,24 +121,36 @@ export async function importStatementCsv(
           source: "statement_import",
           reviewStatus: "committed",
           provenance: JSON.stringify({ fileRef, rowIndex: row.rowIndex }),
+          statementRowKey,
         })
+        .onConflictDoNothing({ target: transactions.statementRowKey })
         .returning({ id: transactions.id });
-      await runDedupCheck(db, inserted.id);
+      if (inserted) {
+        try {
+          await runDedupCheck(db, inserted.id);
+        } catch (err) {
+          console.error(`dedup check failed for transaction ${inserted.id}:`, err);
+        }
+      }
     } else {
-      await db.insert(transactions).values({
-        amount: 0,
-        date: new Date().toISOString().slice(0, 10),
-        vendorRaw: "(unrecognized)",
-        vendorNormalized: "(unrecognized)",
-        category: "Uncategorized",
-        source: "statement_import",
-        reviewStatus: "pending_review",
-        provenance: JSON.stringify({
-          fileRef,
-          rowIndex: row.rowIndex,
-          quarantineReason: row.reason,
-        }),
-      });
+      await db
+        .insert(transactions)
+        .values({
+          amount: 0,
+          date: new Date().toISOString().slice(0, 10),
+          vendorRaw: "(unrecognized)",
+          vendorNormalized: "(unrecognized)",
+          category: "Uncategorized",
+          source: "statement_import",
+          reviewStatus: "pending_review",
+          provenance: JSON.stringify({
+            fileRef,
+            rowIndex: row.rowIndex,
+            quarantineReason: row.reason,
+          }),
+          statementRowKey,
+        })
+        .onConflictDoNothing({ target: transactions.statementRowKey });
     }
   }
 

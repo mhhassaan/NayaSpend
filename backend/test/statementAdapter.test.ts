@@ -4,7 +4,17 @@ import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { transactions } from "../src/db/schema";
 import { importStatementCsv, parseStatementCsv } from "../src/adapters/statementAdapter";
-import { cleanCsv, mixedCsv, unrecognizedColumnsCsv } from "./fixtures/sampleStatements";
+import {
+  cleanCsv,
+  columnShiftCsv,
+  drCrCsv,
+  garbageAmountCsv,
+  mixedCsv,
+  nonIsoDateCsv,
+  rsFormatCsv,
+  trailingMinusCsv,
+  unrecognizedColumnsCsv,
+} from "./fixtures/sampleStatements";
 
 describe("parseStatementCsv", () => {
   test("parses clean rows including a parenthesized negative amount", () => {
@@ -40,6 +50,41 @@ describe("parseStatementCsv", () => {
   test("rowIndex is 0-based and matches the CSV data row order", () => {
     const rows = parseStatementCsv(cleanCsv, "file-1");
     expect(rows.map((r) => r.rowIndex)).toEqual([0, 1, 2]);
+  });
+
+  test("[C2] a non-ISO date (DD/MM/YYYY) is quarantined, not stored unnormalized or thrown", () => {
+    const rows = parseStatementCsv(nonIsoDateCsv, "file-noniso");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].confidence).toBe("low");
+  });
+
+  test("[I3] a trailing-minus amount ('50.00-') is quarantined rather than read as positive", () => {
+    const rows = parseStatementCsv(trailingMinusCsv, "file-trailing");
+    expect(rows[0].confidence).toBe("low");
+  });
+
+  test("[I3] DR/CR suffixed amounts are quarantined rather than silently losing their sign", () => {
+    const rows = parseStatementCsv(drCrCsv, "file-drcr");
+    expect(rows.every((r) => r.confidence === "low")).toBe(true);
+  });
+
+  test("[I3] an amount with trailing garbage ('12abc') is quarantined, not truncated to 12", () => {
+    const rows = parseStatementCsv(garbageAmountCsv, "file-garbage");
+    expect(rows[0].confidence).toBe("low");
+  });
+
+  test("[I4] 'Rs. 1,250.00' (space before the digits) parses correctly instead of quarantining", () => {
+    const rows = parseStatementCsv(rsFormatCsv, "file-rs");
+    expect(rows[0].confidence).toBe("high");
+    if (rows[0].confidence === "high") {
+      expect(rows[0].amountCents).toBe(125000);
+    }
+  });
+
+  test("[I7] a row papaparse reports a field-count error for is quarantined, not silently column-shifted", () => {
+    const rows = parseStatementCsv(columnShiftCsv, "file-shift");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].confidence).toBe("low");
   });
 });
 
@@ -84,11 +129,16 @@ describe("importStatementCsv", () => {
     expect(stmtRow.dedupGroupId).not.toBeNull();
   });
 
-  test("a quarantined CSV row is never dedup-checked", async () => {
+  test("[I6] a quarantined CSV row is never dedup-checked, even against a seed row it would otherwise match exactly", async () => {
     const db = drizzle(env.DB);
+    // Seeded to match the quarantined placeholder's own amount (0),
+    // vendor ("(unrecognized)") and today's date exactly -- if the
+    // committed-only/reviewStatus filter in importStatementCsv or
+    // runDedupCheck were ever removed, this would still match and this
+    // test would catch it.
     await db.insert(transactions).values({
       amount: 0,
-      date: "2026-10-27",
+      date: new Date().toISOString().slice(0, 10),
       vendorRaw: "(unrecognized)",
       vendorNormalized: "(unrecognized)",
       category: "Uncategorized",
@@ -101,5 +151,14 @@ describe("importStatementCsv", () => {
 
     const [stmtRow] = await db.select().from(transactions).where(eq(transactions.source, "statement_import"));
     expect(stmtRow.dedupGroupId).toBeNull();
+  });
+
+  test("[I1] re-importing the same file (e.g. a retry after a partial failure) does not duplicate rows", async () => {
+    const db = drizzle(env.DB);
+    await importStatementCsv(db, cleanCsv, "file-retry");
+    await importStatementCsv(db, cleanCsv, "file-retry");
+
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(3); // not 6
   });
 });

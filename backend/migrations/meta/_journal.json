@@ -15,6 +15,13 @@
       "when": 1793669798424,
       "tag": "0001_backfill_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793671091435,
+      "tag": "0002_statement_idempotency",
+      "breakpoints": true
     }
   ]
 }

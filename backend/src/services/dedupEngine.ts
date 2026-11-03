@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, ne } from "drizzle-orm";
+import { and, eq, gte, isNull, lte, ne, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { transactions } from "../db/schema";
 import { diceCoefficient } from "../utils/stringSimilarity";
@@ -25,7 +25,17 @@ export async function runDedupCheck(
   const [subject] = await db.select().from(transactions).where(eq(transactions.id, transactionId));
 
   const otherSource = subject ? OTHER_SOURCE[subject.source] : undefined;
-  if (!subject || subject.reviewStatus !== "committed" || !otherSource) {
+  if (
+    !subject ||
+    subject.reviewStatus !== "committed" ||
+    !otherSource ||
+    subject.deletedAt !== null ||
+    // Already matched (or already resolved by the user) -- never
+    // re-grouped. Re-grouping an already-matched row would silently
+    // orphan its original partner and could overwrite a user's
+    // dedup_resolution decision.
+    subject.dedupGroupId !== null
+  ) {
     return { matched: false, dedupGroupId: null };
   }
 
@@ -42,9 +52,14 @@ export async function runDedupCheck(
         eq(transactions.amount, subject.amount),
         gte(transactions.date, earliestDate),
         lte(transactions.date, latestDate),
-        ne(transactions.id, subject.id)
+        ne(transactions.id, subject.id),
+        isNull(transactions.dedupGroupId),
+        isNull(transactions.deletedAt)
       )
     )
+    // Closest date first, so the most plausible match wins when several
+    // candidates fall inside the tolerance window.
+    .orderBy(sql`ABS(julianday(${transactions.date}) - julianday(${subject.date}))`, transactions.id)
     .limit(CANDIDATE_LIMIT);
 
   const match = candidates.find(
@@ -57,14 +72,16 @@ export async function runDedupCheck(
   }
 
   const dedupGroupId = crypto.randomUUID();
-  await db
-    .update(transactions)
-    .set({ dedupGroupId, dedupResolution: "pending" })
-    .where(eq(transactions.id, subject.id));
-  await db
-    .update(transactions)
-    .set({ dedupGroupId, dedupResolution: "pending" })
-    .where(eq(transactions.id, match.id));
+  await db.batch([
+    db
+      .update(transactions)
+      .set({ dedupGroupId, dedupResolution: "pending" })
+      .where(eq(transactions.id, subject.id)),
+    db
+      .update(transactions)
+      .set({ dedupGroupId, dedupResolution: "pending" })
+      .where(eq(transactions.id, match.id)),
+  ]);
 
   return { matched: true, dedupGroupId };
 }

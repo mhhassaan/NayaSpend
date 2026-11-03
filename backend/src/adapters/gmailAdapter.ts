@@ -174,10 +174,18 @@ export async function runBackfill(
     // durable committed rows, per the spec's "only compares committed
     // against committed" rule) and only for rows this call actually
     // inserted, never for a quarantined row or one skipped as a duplicate.
+    // A failure here (e.g. a transient D1 error) must not undo or lose
+    // the capture itself -- the transaction rows and checkpoint are
+    // already durably committed above, so a dedup-check failure is
+    // logged and skipped, not thrown.
     for (const rows of insertResults) {
       for (const row of rows) {
         if (row.reviewStatus === "committed") {
-          await runDedupCheck(db, row.id);
+          try {
+            await runDedupCheck(db, row.id);
+          } catch (err) {
+            console.error(`dedup check failed for transaction ${row.id}:`, err);
+          }
         }
       }
     }

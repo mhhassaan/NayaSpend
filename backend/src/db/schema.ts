@@ -32,6 +32,11 @@ export const transactions = sqliteTable("transactions", {
   // the same Gmail message (e.g. a retried/resumed backfill chunk) is a
   // no-op via onConflictDoNothing rather than a duplicate transaction.
   gmailMessageId: text("gmail_message_id").unique(),
+  // Idempotency key for statement_import rows only: "<fileRef>:<rowIndex>".
+  // Re-importing the same file (a retried/resumed import, or the user
+  // re-uploading the same statement) is a no-op per row via
+  // onConflictDoNothing, not a duplicate transaction.
+  statementRowKey: text("statement_row_key").unique(),
 }, (table) => ({
   amountIsInteger: check(
     "amount_is_integer",
