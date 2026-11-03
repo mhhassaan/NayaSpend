@@ -4,7 +4,7 @@ import { categoryRules } from "../db/schema";
 
 const UNCATEGORIZED = "Uncategorized";
 
-function normalize(vendor: string): string {
+export function normalize(vendor: string): string {
   return vendor.trim().toLowerCase();
 }
 
