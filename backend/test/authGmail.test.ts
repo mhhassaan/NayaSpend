@@ -15,6 +15,7 @@ const testEnv = {
   GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
   RESEND_API_KEY: "test-resend-key",
   TOKEN_ENCRYPTION_KEY: btoa("test-key-32-bytes-long-exactly!!"),
+  NOTIFICATION_EMAIL: "user@example.com",
 };
 
 describe("authGmail routes", () => {
