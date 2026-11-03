@@ -5,13 +5,14 @@ import { loadConfig } from "../src/config";
 const VALID_KEY = btoa("test-key-32-bytes-long-exactly!!");
 
 describe("loadConfig", () => {
-  test("reads all five required secrets", () => {
+  test("reads all six required secrets", () => {
     const env = {
       GMAIL_CLIENT_ID: "a",
       GMAIL_CLIENT_SECRET: "b",
       GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: VALID_KEY,
+      NOTIFICATION_EMAIL: "user@example.com",
     };
     const config = loadConfig(env);
     expect(config).toEqual({
@@ -20,6 +21,7 @@ describe("loadConfig", () => {
       gmailRedirectUri: "https://example.com/auth/gmail/callback",
       resendApiKey: "c",
       tokenEncryptionKey: VALID_KEY,
+      notificationEmail: "user@example.com",
     });
   });
 
@@ -35,6 +37,7 @@ describe("loadConfig", () => {
       GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: "   ",
+      NOTIFICATION_EMAIL: "user@example.com",
     };
     expect(() => loadConfig(env)).toThrow(/TOKEN_ENCRYPTION_KEY/);
   });
@@ -46,6 +49,7 @@ describe("loadConfig", () => {
       GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: "ZGQ=", // decodes to 2 bytes, not 32
+      NOTIFICATION_EMAIL: "user@example.com",
     };
     expect(() => loadConfig(env)).toThrow(/TOKEN_ENCRYPTION_KEY/);
   });
@@ -57,7 +61,19 @@ describe("loadConfig", () => {
       GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: "your-base64-encoded-32-byte-key", // placeholder-shaped, not valid base64
+      NOTIFICATION_EMAIL: "user@example.com",
     };
     expect(() => loadConfig(env)).toThrow(/TOKEN_ENCRYPTION_KEY/);
+  });
+
+  test("throws a clear error naming NOTIFICATION_EMAIL when it is missing", () => {
+    const env = {
+      GMAIL_CLIENT_ID: "a",
+      GMAIL_CLIENT_SECRET: "b",
+      GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
+      RESEND_API_KEY: "c",
+      TOKEN_ENCRYPTION_KEY: VALID_KEY,
+    };
+    expect(() => loadConfig(env)).toThrow(/NOTIFICATION_EMAIL/);
   });
 });

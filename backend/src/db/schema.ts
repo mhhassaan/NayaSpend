@@ -50,7 +50,7 @@ export const captureRuns = sqliteTable("capture_runs", {
   lastSuccessfulRun: text("last_successful_run"),
   // One of: success | job_did_not_run | api_call_failed
   runStatus: text("run_status").notNull(),
-  // One of: auth_failure | rate_limit | network_timeout | unknown
+  // One of: auth_failure | rate_limit | network_timeout | history_expired | unknown
   errorType: text("error_type"),
   backfillPageToken: text("backfill_page_token"),
   // Set once Gmail reports no further backfill pages. Distinguishes

@@ -16,3 +16,7 @@ RESEND_API_KEY=your-resend-api-key
 # Base64-encoded 256-bit key used to AES-256-GCM encrypt the Gmail OAuth
 # token at rest. Generate with: openssl rand -base64 32
 TOKEN_ENCRYPTION_KEY=your-base64-encoded-32-byte-key
+
+# The single user's own email address -- where capture-health, budget,
+# and bill-reminder notifications are sent.
+NOTIFICATION_EMAIL=you@example.com

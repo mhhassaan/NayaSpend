@@ -127,4 +127,107 @@ describe("createGmailClient", () => {
 
     expect(message.bodyText).toBe("Plain part body");
   });
+
+  test("listHistory calls users.history.list with startHistoryId and returns added message ids + new watermark", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(url).toContain("startHistoryId=100");
+      expect(url).toContain("/users/me/history");
+      return new Response(
+        JSON.stringify({
+          history: [
+            { messagesAdded: [{ message: { id: "m1" } }] },
+            { messagesAdded: [{ message: { id: "m2" } }, { message: { id: "m3" } }] },
+          ],
+          historyId: "150",
+        }),
+        { status: 200 }
+      );
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = createGmailClient("fake-access-token");
+    const result = await client.listHistory("100", 50);
+
+    expect(result.addedMessageIds).toEqual(["m1", "m2", "m3"]);
+    expect(result.newHistoryId).toBe("150");
+  });
+
+  test("listHistory falls back to the start watermark when Gmail reports no new history", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({}), { status: 200 })));
+    const client = createGmailClient("fake-access-token");
+
+    const result = await client.listHistory("100", 50);
+
+    expect(result.addedMessageIds).toEqual([]);
+    expect(result.newHistoryId).toBe("100");
+  });
+
+  test("listHistory throws a typed GmailApiError on failure, same as listMessages/getMessage", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })));
+    const client = createGmailClient("expired-token");
+
+    await expect(client.listHistory("100", 50)).rejects.toMatchObject({ errorType: "auth_failure" });
+  });
+
+  test("[C1] listHistory scopes to the INBOX label", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.get("labelId")).toBe("INBOX");
+      return new Response(JSON.stringify({ historyId: "100" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = createGmailClient("fake-access-token");
+
+    await client.listHistory("100", 50);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  test("[C2] listHistory passes a pageToken through and returns the response's nextPageToken", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.get("pageToken")).toBe("page2");
+      return new Response(JSON.stringify({ historyId: "150", nextPageToken: "page3" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = createGmailClient("fake-access-token");
+
+    const result = await client.listHistory("100", 50, "page2");
+
+    expect(result.nextPageToken).toBe("page3");
+  });
+
+  test("[C2] listHistory omits pageToken from the request when none is given", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.has("pageToken")).toBe(false);
+      return new Response(JSON.stringify({ historyId: "100" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = createGmailClient("fake-access-token");
+
+    await client.listHistory("100", 50);
+  });
+
+  test("[I1] listHistory throws errorType 'history_expired' on a 404 (startHistoryId too old), distinct from other failures", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
+    const client = createGmailClient("fake-access-token");
+
+    await expect(client.listHistory("100", 50)).rejects.toMatchObject({ errorType: "history_expired" });
+  });
+
+  test("getCurrentHistoryId calls users.getProfile and returns its historyId", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(url).toContain("profile");
+      return new Response(JSON.stringify({ historyId: "999" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = createGmailClient("fake-access-token");
+
+    expect(await client.getCurrentHistoryId()).toBe("999");
+  });
+
+  test("getCurrentHistoryId throws a typed GmailApiError on failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })));
+    const client = createGmailClient("fake-access-token");
+
+    await expect(client.getCurrentHistoryId()).rejects.toBeInstanceOf(GmailApiError);
+  });
 });

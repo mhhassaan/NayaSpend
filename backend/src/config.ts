@@ -8,6 +8,7 @@ export type ConfigEnv = {
   GMAIL_REDIRECT_URI: string;
   RESEND_API_KEY: string;
   TOKEN_ENCRYPTION_KEY: string;
+  NOTIFICATION_EMAIL: string;
 };
 
 export type AppConfig = {
@@ -16,6 +17,7 @@ export type AppConfig = {
   gmailRedirectUri: string;
   resendApiKey: string;
   tokenEncryptionKey: string;
+  notificationEmail: string;
 };
 
 const REQUIRED_KEYS = [
@@ -24,6 +26,7 @@ const REQUIRED_KEYS = [
   "GMAIL_REDIRECT_URI",
   "RESEND_API_KEY",
   "TOKEN_ENCRYPTION_KEY",
+  "NOTIFICATION_EMAIL",
 ] as const;
 
 export function loadConfig(env: Partial<ConfigEnv>): AppConfig {
@@ -54,5 +57,6 @@ export function loadConfig(env: Partial<ConfigEnv>): AppConfig {
     gmailRedirectUri: env.GMAIL_REDIRECT_URI as string,
     resendApiKey: env.RESEND_API_KEY as string,
     tokenEncryptionKey: env.TOKEN_ENCRYPTION_KEY as string,
+    notificationEmail: env.NOTIFICATION_EMAIL as string,
   };
 }
