@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { captureRuns, transactions } from "../src/db/schema";
-import { runBackfill } from "../src/adapters/gmailAdapter";
+import { runBackfill, runOngoingPoll } from "../src/adapters/gmailAdapter";
 import { parseNayaPayEmail } from "../src/adapters/parseNayaPayEmail";
 import {
   cleanTransactionEmail,
@@ -152,6 +152,12 @@ function fakeClient(
         throw new Error(`simulated fetch failure for ${id}`);
       }
       return bodies[id];
+    },
+    async listHistory() {
+      return { addedMessageIds: [], newHistoryId: "unused" };
+    },
+    async getCurrentHistoryId() {
+      return "unused";
     },
   };
 }
@@ -375,5 +381,97 @@ describe("runBackfill", () => {
     expect(run.runStatus).toBe("success"); // the chunk itself still succeeded
 
     spy.mockRestore();
+  });
+
+  test("backfill completion seeds pollingHistoryId via getCurrentHistoryId", async () => {
+    const db = drizzle(env.DB);
+    const client = fakeClient(
+      { first: { messages: [{ id: "m-clean" }] } },
+      { "m-clean": cleanTransactionEmail }
+    );
+    client.getCurrentHistoryId = async () => "500";
+
+    await runBackfill(db, client);
+
+    const [run] = await db.select().from(captureRuns);
+    expect(run.backfillCompletedAt).not.toBeNull();
+    expect(run.pollingHistoryId).toBe("500");
+  });
+
+  test("backfill that is NOT yet complete (more pages remain) does not seed pollingHistoryId", async () => {
+    const db = drizzle(env.DB);
+    const client = fakeClient(
+      { first: { messages: [{ id: "m-clean" }], nextPageToken: "page2" } },
+      { "m-clean": cleanTransactionEmail }
+    );
+    client.getCurrentHistoryId = async () => {
+      throw new Error("must not be called before backfill is complete");
+    };
+
+    await runBackfill(db, client);
+
+    const [run] = await db.select().from(captureRuns);
+    expect(run.pollingHistoryId).toBeNull();
+  });
+});
+
+describe("runOngoingPoll", () => {
+  test("processes newly-added messages found via history, same parse/categorize/dedup path as backfill", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    const client = fakeClient({ first: { messages: [] } }, {});
+    client.listHistory = async (startHistoryId, _maxResults) => {
+      expect(startHistoryId).toBe("100");
+      return { addedMessageIds: ["m-clean"], newHistoryId: "200" };
+    };
+    client.getMessage = async (id) => (id === "m-clean" ? cleanTransactionEmail : (undefined as never));
+
+    const result = await runOngoingPoll(db, client);
+
+    expect(result.processed).toBe(1);
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe("gmail_email");
+    expect(rows[0].reviewStatus).toBe("committed");
+    const [run] = await db.select().from(captureRuns);
+    expect(run.pollingHistoryId).toBe("200");
+    expect(run.backfillPageToken).toBeNull(); // untouched -- separate mechanism
+  });
+
+  test("a message already captured by backfill (same gmail_message_id) is never duplicated", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    await db.insert(transactions).values({
+      amount: 125000,
+      date: "2026-10-27",
+      vendorRaw: "Starbucks",
+      vendorNormalized: "starbucks",
+      category: "Coffee",
+      source: "gmail_email",
+      provenance: "{}",
+      reviewStatus: "committed",
+      gmailMessageId: "m-clean",
+    });
+    const client = fakeClient({ first: { messages: [] } }, {});
+    client.listHistory = async () => ({ addedMessageIds: ["m-clean"], newHistoryId: "200" });
+    client.getMessage = async () => cleanTransactionEmail;
+
+    await runOngoingPoll(db, client);
+
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(1); // not duplicated
+  });
+
+  test("a quiet poll (no new messages) is healthy, not an error", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    const client = fakeClient({ first: { messages: [] } }, {});
+    client.listHistory = async () => ({ addedMessageIds: [], newHistoryId: "100" });
+
+    const result = await runOngoingPoll(db, client);
+
+    expect(result.processed).toBe(0);
+    const [run] = await db.select().from(captureRuns);
+    expect(run.runStatus).toBe("success");
   });
 });

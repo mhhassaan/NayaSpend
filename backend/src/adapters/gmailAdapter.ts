@@ -142,6 +142,12 @@ export async function runBackfill(
   const backfillFinished = !nextPageToken;
   const resolvedNextPageToken = nextPageToken ?? null;
 
+  // The moment backfill finishes, seed the ongoing-poll watermark to
+  // Gmail's *current* historyId -- so forward polling picks up exactly
+  // where backfill leaves off, with no gap or overlap. Never seeded on
+  // an incomplete backfill (more pages remain).
+  const pollingHistoryId = backfillFinished ? await client.getCurrentHistoryId() : undefined;
+
   const checkpointUpdate = db
     .update(captureRuns)
     .set({
@@ -151,6 +157,7 @@ export async function runBackfill(
       lastSuccessfulRun: attemptedAt,
       runStatus: "success",
       errorType: null,
+      ...(pollingHistoryId !== undefined ? { pollingHistoryId } : {}),
     })
     .where(eq(captureRuns.id, run.id));
 
@@ -206,4 +213,120 @@ export async function runBackfill(
   );
 
   return { processed: committedCount + quarantinedCount, nextPageToken: resolvedNextPageToken };
+}
+
+/**
+ * Forward (ongoing) polling via Gmail's historyId watermark -- a
+ * completely separate mechanism from runBackfill's backward pageToken
+ * paging. Shares the same row-building, idempotency (gmail_message_id),
+ * batching, and dedup-check-after-batch structure.
+ */
+export async function runOngoingPoll(
+  db: DrizzleD1Database,
+  client: GmailClient,
+  options?: { maxMessagesPerChunk?: number }
+): Promise<{ processed: number }> {
+  const maxMessagesPerChunk = options?.maxMessagesPerChunk ?? DEFAULT_MAX_MESSAGES_PER_CHUNK;
+
+  const run = await getOrCreateCaptureRun(db);
+  const attemptedAt = new Date().toISOString();
+
+  if (!run.pollingHistoryId) {
+    // Ongoing polling has no watermark yet -- backfill hasn't completed,
+    // so there is nothing to poll forward from.
+    return { processed: 0 };
+  }
+
+  let historyResult: { addedMessageIds: string[]; newHistoryId: string };
+  try {
+    historyResult = await client.listHistory(run.pollingHistoryId, maxMessagesPerChunk);
+  } catch (err) {
+    await db
+      .update(captureRuns)
+      .set({
+        lastAttemptedRun: attemptedAt,
+        runStatus: "api_call_failed",
+        errorType: err instanceof GmailApiError ? err.errorType : "unknown",
+      })
+      .where(eq(captureRuns.id, run.id));
+    return { processed: 0 };
+  }
+
+  const { addedMessageIds, newHistoryId } = historyResult;
+
+  const rowsToInsert: TransactionInsert[] = [];
+  let committedCount = 0;
+  let quarantinedCount = 0;
+  let fetchFailedCount = 0;
+
+  for (const id of addedMessageIds) {
+    let message: GmailMessage;
+    try {
+      message = await client.getMessage(id);
+    } catch {
+      fetchFailedCount++;
+      continue;
+    }
+
+    const parsed = parseNayaPayEmail(message);
+
+    if (parsed.confidence === "high") {
+      const category = await categorize(db, parsed.vendorRaw);
+      rowsToInsert.push(buildCommittedRow(message, category, parsed));
+      committedCount++;
+    } else {
+      rowsToInsert.push(buildQuarantinedRow(message, parsed.reason));
+      quarantinedCount++;
+    }
+  }
+
+  const checkpointUpdate = db
+    .update(captureRuns)
+    .set({
+      pollingHistoryId: newHistoryId,
+      lastAttemptedRun: attemptedAt,
+      lastSuccessfulRun: attemptedAt,
+      runStatus: "success",
+      errorType: null,
+    })
+    .where(eq(captureRuns.id, run.id));
+
+  const insertStatements = rowsToInsert.map((values) =>
+    db
+      .insert(transactions)
+      .values(values)
+      .onConflictDoNothing({ target: transactions.gmailMessageId })
+      .returning({ id: transactions.id, reviewStatus: transactions.reviewStatus })
+  );
+
+  if (insertStatements.length > 0) {
+    const batchResults = await db.batch([insertStatements[0], ...insertStatements.slice(1), checkpointUpdate]);
+    const insertResults = batchResults.slice(0, insertStatements.length) as { id: number; reviewStatus: string }[][];
+
+    for (const rows of insertResults) {
+      for (const row of rows) {
+        if (row.reviewStatus === "committed") {
+          try {
+            await runDedupCheck(db, row.id);
+          } catch (err) {
+            console.error(`dedup check failed for transaction ${row.id}:`, err);
+          }
+        }
+      }
+    }
+  } else {
+    await checkpointUpdate;
+  }
+
+  console.log(
+    JSON.stringify({
+      query: NAYAPAY_QUERY,
+      scanned: addedMessageIds.length,
+      committed: committedCount,
+      quarantined: quarantinedCount,
+      fetchFailed: fetchFailedCount,
+    })
+  );
+
+  return { processed: committedCount + quarantinedCount };
 }

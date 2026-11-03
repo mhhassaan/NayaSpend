@@ -47,6 +47,11 @@ export type GmailClient = {
     maxResults: number
   ): Promise<{ messages: GmailMessageSummary[]; nextPageToken?: string }>;
   getMessage(id: string): Promise<GmailMessage>;
+  listHistory(
+    startHistoryId: string,
+    maxResults: number
+  ): Promise<{ addedMessageIds: string[]; newHistoryId: string }>;
+  getCurrentHistoryId(): Promise<string>;
 };
 
 function base64UrlToText(data: string): string {
@@ -121,6 +126,37 @@ export function createGmailClient(accessToken: string): GmailClient {
         from: findHeader(json.payload.headers, "From"),
         bodyText: findPlainTextBody(json.payload),
       };
+    },
+
+    async listHistory(startHistoryId, maxResults) {
+      const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
+      url.searchParams.set("startHistoryId", startHistoryId);
+      url.searchParams.set("maxResults", String(maxResults));
+      url.searchParams.set("historyTypes", "messageAdded");
+
+      const response = await fetch(url.toString(), { headers: authHeaders });
+      if (!response.ok) await throwForFailedResponse(response);
+
+      const json = (await response.json()) as {
+        history?: { messagesAdded?: { message: { id: string } }[] }[];
+        historyId?: string;
+      };
+
+      const addedMessageIds = (json.history ?? []).flatMap(
+        (entry) => entry.messagesAdded?.map((added) => added.message.id) ?? []
+      );
+
+      return { addedMessageIds, newHistoryId: json.historyId ?? startHistoryId };
+    },
+
+    async getCurrentHistoryId() {
+      const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+        headers: authHeaders,
+      });
+      if (!response.ok) await throwForFailedResponse(response);
+
+      const json = (await response.json()) as { historyId: string };
+      return json.historyId;
     },
   };
 }
