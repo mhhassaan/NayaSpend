@@ -16,7 +16,52 @@ type Env = {
 
 export const authGmailRoutes = new Hono<{ Bindings: Env }>();
 
-function consentUrl(clientId: string, redirectUri: string): string {
+const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function hmacSha256(message: string, base64Key: string): Promise<Uint8Array> {
+  const keyBytes = Uint8Array.from(atob(base64Key), (c) => c.charCodeAt(0));
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return new Uint8Array(signature);
+}
+
+// Stateless, time-boxed OAuth CSRF token: no server-side session, no new
+// secret -- reuses TOKEN_ENCRYPTION_KEY (already high-entropy, already a
+// Worker secret) purely as an HMAC key here, unrelated to its AES use in
+// security.ts.
+export async function signState(timestampMs: number, key: string): Promise<string> {
+  const timestampPart = bytesToBase64Url(new TextEncoder().encode(String(timestampMs)));
+  const mac = await hmacSha256(String(timestampMs), key);
+  return `${timestampPart}.${bytesToBase64Url(mac)}`;
+}
+
+async function verifyState(state: string, key: string): Promise<boolean> {
+  const parts = state.split(".");
+  if (parts.length !== 2) return false;
+  const [timestampPart, macPart] = parts;
+
+  let timestampMs: number;
+  try {
+    const padded = timestampPart.replace(/-/g, "+").replace(/_/g, "/");
+    timestampMs = Number(atob(padded));
+  } catch {
+    return false;
+  }
+  if (!Number.isFinite(timestampMs)) return false;
+
+  const expected = await signState(timestampMs, key);
+  if (expected !== `${timestampPart}.${macPart}`) return false;
+
+  return Date.now() - timestampMs <= STATE_MAX_AGE_MS;
+}
+
+function consentUrl(clientId: string, redirectUri: string, state: string): string {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", clientId);
   url.searchParams.set("redirect_uri", redirectUri);
@@ -24,14 +69,16 @@ function consentUrl(clientId: string, redirectUri: string): string {
   url.searchParams.set("scope", "https://www.googleapis.com/auth/gmail.readonly");
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
+  url.searchParams.set("state", state);
   return url.toString();
 }
 
-function redirectToConsent(c: { env: Env }) {
+async function redirectToConsent(c: { env: Env }) {
   const config = loadConfig(c.env);
+  const state = await signState(Date.now(), config.tokenEncryptionKey);
   return new Response(null, {
     status: 302,
-    headers: { Location: consentUrl(config.gmailClientId, config.gmailRedirectUri) },
+    headers: { Location: consentUrl(config.gmailClientId, config.gmailRedirectUri, state) },
   });
 }
 
@@ -39,12 +86,17 @@ authGmailRoutes.get("/connect", (c) => redirectToConsent(c));
 authGmailRoutes.get("/reconnect", (c) => redirectToConsent(c));
 
 authGmailRoutes.get("/callback", async (c) => {
+  const config = loadConfig(c.env);
+
+  const state = c.req.query("state");
+  if (!state || !(await verifyState(state, config.tokenEncryptionKey))) {
+    return c.text("Missing or invalid state parameter", 400);
+  }
+
   const code = c.req.query("code");
   if (!code) {
     return c.text("Missing required query parameter: code", 400);
   }
-
-  const config = loadConfig(c.env);
 
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
