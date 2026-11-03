@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { captureRuns, transactions } from "../db/schema";
 import { categorize, normalize } from "../services/categorizationEngine";
+import { runDedupCheck } from "../services/dedupEngine";
 import { GmailApiError, NAYAPAY_QUERY } from "./gmailClient";
 import type { GmailClient, GmailMessage } from "./gmailClient";
 import { parseNayaPayEmail } from "./parseNayaPayEmail";
@@ -155,12 +156,39 @@ export async function runBackfill(
 
   // Idempotent on gmail_message_id: a retried chunk that re-inserts an
   // already-committed message is a no-op, never a duplicate transaction.
+  // .returning() lets us dedup-check exactly the rows actually inserted
+  // (onConflictDoNothing means a given statement may insert nothing).
   const insertStatements = rowsToInsert.map((values) =>
-    db.insert(transactions).values(values).onConflictDoNothing({ target: transactions.gmailMessageId })
+    db
+      .insert(transactions)
+      .values(values)
+      .onConflictDoNothing({ target: transactions.gmailMessageId })
+      .returning({ id: transactions.id, reviewStatus: transactions.reviewStatus })
   );
 
   if (insertStatements.length > 0) {
-    await db.batch([insertStatements[0], ...insertStatements.slice(1), checkpointUpdate]);
+    const batchResults = await db.batch([insertStatements[0], ...insertStatements.slice(1), checkpointUpdate]);
+    const insertResults = batchResults.slice(0, insertStatements.length) as { id: number; reviewStatus: string }[][];
+
+    // Dedup-checking happens after the batch commits (it reads already-
+    // durable committed rows, per the spec's "only compares committed
+    // against committed" rule) and only for rows this call actually
+    // inserted, never for a quarantined row or one skipped as a duplicate.
+    // A failure here (e.g. a transient D1 error) must not undo or lose
+    // the capture itself -- the transaction rows and checkpoint are
+    // already durably committed above, so a dedup-check failure is
+    // logged and skipped, not thrown.
+    for (const rows of insertResults) {
+      for (const row of rows) {
+        if (row.reviewStatus === "committed") {
+          try {
+            await runDedupCheck(db, row.id);
+          } catch (err) {
+            console.error(`dedup check failed for transaction ${row.id}:`, err);
+          }
+        }
+      }
+    }
   } else {
     await checkpointUpdate;
   }

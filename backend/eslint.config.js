@@ -4,5 +4,13 @@ export default tseslint.config(
   {
     ignores: ["node_modules/**", "migrations/**", ".wrangler/**"],
   },
-  ...tseslint.configs.recommended
+  ...tseslint.configs.recommended,
+  {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
+    },
+  }
 );
