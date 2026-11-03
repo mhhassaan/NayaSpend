@@ -45,18 +45,19 @@ describe("D1 feasibility spike", () => {
   });
 
   test("GROUP BY category+month aggregation (proxy for trends service)", async () => {
+    type MonthlyTotal = { category: string; month: string; total: number };
     const result = await env.DB
       .prepare(
         "SELECT category, substr(date, 1, 7) AS month, SUM(amount) AS total " +
           "FROM spike_transactions GROUP BY category, month ORDER BY category, month"
       )
-      .all();
+      .all<MonthlyTotal>();
     expect(result.results.length).toBeGreaterThan(0);
     const groceriesNov = result.results.find(
-      (r: any) => r.category === "Groceries" && r.month === "2026-11"
+      (r) => r.category === "Groceries" && r.month === "2026-11"
     );
     expect(groceriesNov).toBeDefined();
-    expect((groceriesNov as any).total).toBe(3000);
+    expect(groceriesNov?.total).toBe(3000);
   });
 
   test("LIKE-based substring pre-filter on vendor_normalized (coarse half of fuzzy-match)", async () => {

@@ -21,4 +21,9 @@ describe("security token encryption", () => {
     const tampered = ciphertext.slice(0, -4) + (ciphertext.slice(-4) === "abcd" ? "dcba" : "abcd");
     await expect(decryptToken(tampered, key)).rejects.toThrow();
   });
+
+  test("a key that doesn't decode to exactly 32 bytes is rejected (module-level invariant)", async () => {
+    const shortKey = btoa("too-short");
+    await expect(encryptToken("some-plaintext", shortKey)).rejects.toThrow(/32 bytes/);
+  });
 });

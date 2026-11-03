@@ -1,3 +1,7 @@
+import { base64ToBytes } from "./security";
+
+const ENCRYPTION_KEY_LENGTH_BYTES = 32; // AES-256 requires exactly 32 key bytes.
+
 export type ConfigEnv = {
   GMAIL_CLIENT_ID: string;
   GMAIL_CLIENT_SECRET: string;
@@ -21,9 +25,24 @@ const REQUIRED_KEYS = [
 
 export function loadConfig(env: Partial<ConfigEnv>): AppConfig {
   for (const key of REQUIRED_KEYS) {
-    if (!env[key]) {
+    if (!env[key]?.trim()) {
       throw new Error(`Missing required secret: ${key}`);
     }
+  }
+
+  const tokenEncryptionKey = env.TOKEN_ENCRYPTION_KEY as string;
+  let decodedKeyLength: number;
+  try {
+    decodedKeyLength = base64ToBytes(tokenEncryptionKey).length;
+  } catch {
+    throw new Error(
+      `Invalid TOKEN_ENCRYPTION_KEY: not valid base64 (expected a base64-encoded ${ENCRYPTION_KEY_LENGTH_BYTES}-byte key)`
+    );
+  }
+  if (decodedKeyLength !== ENCRYPTION_KEY_LENGTH_BYTES) {
+    throw new Error(
+      `Invalid TOKEN_ENCRYPTION_KEY: must decode to exactly ${ENCRYPTION_KEY_LENGTH_BYTES} bytes for AES-256-GCM, got ${decodedKeyLength}`
+    );
   }
 
   return {

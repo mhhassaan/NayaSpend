@@ -1,6 +1,8 @@
 const IV_LENGTH_BYTES = 12;
+const KEY_LENGTH_BYTES = 32; // AES-256 requires exactly 32 key bytes.
 
-function base64ToBytes(base64: string): Uint8Array {
+/** Decodes a base64 string to raw bytes. Throws if `base64` is not valid base64. */
+export function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
@@ -19,6 +21,11 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 async function importKey(base64Key: string): Promise<CryptoKey> {
   const keyBytes = base64ToBytes(base64Key);
+  if (keyBytes.length !== KEY_LENGTH_BYTES) {
+    throw new Error(
+      `Encryption key must decode to exactly ${KEY_LENGTH_BYTES} bytes for AES-256-GCM, got ${keyBytes.length}`
+    );
+  }
   return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, [
     "encrypt",
     "decrypt",

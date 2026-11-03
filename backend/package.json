@@ -9,16 +9,18 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "hono": "^4.6.0",
-    "drizzle-orm": "^0.36.0"
+    "drizzle-orm": "^0.36.0",
+    "hono": "^4.6.0"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.28.0",
-    "vitest": "^2.1.0",
     "@cloudflare/vitest-pool-workers": "^0.6.0",
     "@cloudflare/workers-types": "^4.20241022.0",
+    "drizzle-kit": "^0.28.0",
     "eslint": "^9.14.0",
+    "globals": "^17.14.0",
     "typescript": "^5.6.0",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^2.1.0",
     "wrangler": "^3.84.0"
   },
   "allowScripts": {

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "920a10a9-357f-4ceb-8497-06ae9f365abb",
+  "id": "6cc3c37e-e3f8-41af-b813-1fa52049a99c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "bills": {
@@ -316,7 +316,12 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "amount_is_integer": {
+          "name": "amount_is_integer",
+          "value": "\"transactions\".\"amount\" = CAST(\"transactions\".\"amount\" AS INTEGER)"
+        }
+      }
     }
   },
   "views": {},

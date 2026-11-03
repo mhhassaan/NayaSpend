@@ -50,5 +50,5 @@ CREATE TABLE `transactions` (
 	`dedup_group_id` text,
 	`dedup_resolution` text,
 	`deleted_at` text,
-	CHECK (`amount` = CAST(`amount` AS INTEGER))
+	CONSTRAINT "amount_is_integer" CHECK("transactions"."amount" = CAST("transactions"."amount" AS INTEGER))
 );
