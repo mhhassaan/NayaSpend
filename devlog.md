@@ -311,15 +311,51 @@ Scope: the third, manual capture path (CUJ 3) for anything neither Gmail nor a b
 
 ---
 
+## Phase 7: Trends, budgets, bills — merged to master
+
+**Plan:** `docs/superpowers/plans/2026-11-03-trends-budgets-bills.md`
+**Branch:** `worktree-trends-budgets-bills` (merged, deleted)
+
+Scope: the last three capture-adjacent services (budget alerts, bill reminders, trends), the remaining API routes (budgets/bills CRUD, trends, statements, capture), a shared Gmail-credential/refresh helper extracted from `index.ts`, the long-deferred OAuth CSRF `state` fix, and mounting the *entire* API surface — including `authGmail.ts`, live since Phase 2 but never mounted — into the real app.
+
+**Plan-level rulings:**
+- Budget period is calendar-month only for v1; `periodType` is validated to accept only `"monthly"`.
+- Budget alerts fire at 80%/100% thresholds, each once per month; bill reminders fire once per due date — both via new nullable debounce columns (migration `0003_budget_bill_alert_state`), which also adds the `CHECK (… > 0)` constraint `transactions.amount` already has to `budgets.limit_amount`/`bills.expected_amount`.
+- The dedup-exclusion filter (`committed`, not soft-deleted, not `dedup_resolution: "pending"`) is one shared predicate, used by both `budgetAlertTrigger.ts` and `trendsService.ts`.
+- The OAuth `state` parameter is a stateless, time-boxed, HMAC-signed token reusing `TOKEN_ENCRYPTION_KEY` — no new secret, no server-side session.
+- `statements.ts` accepts CSV only (PDF remains gated on Phase 4's unresolved bank-formats question).
+- Budgets/bills CRUD allow real deletion (configuration, not financial records — unlike `transactions`).
+
+**Work completed (9 tasks, all committed):** budget alert trigger + migration, bill reminder trigger, trends aggregation service, budgets/bills CRUD routes, trends route, statements upload route, shared `gmailCredentialStore.ts` extraction + manual capture route, OAuth CSRF `state` fix, and mounting everything plus wiring the previously-no-op 6-hour cron to the new evaluators.
+
+**Final review (fresh-context Agent, opus) — 1 Critical + 6 Important + several Minor findings.** The reviewer independently verified the Task 1 ledger ruling (the plan's own dedup-exclusion predicate is wrong under SQL's three-valued logic) by applying the migrations to a scratch SQLite DB — confirmed correct as implemented.
+
+| # | Finding | Fix |
+|---|---|---|
+| C1 | Statement `fileRef` included `Date.now()`, so re-uploading the exact same file got a fresh idempotency key every time and silently double-imported every row — defeating `importStatementCsv`'s own promise | `fileRef` is now a SHA-256 hash of the file content, stable across re-uploads |
+| I1 | The 0003 migration's drizzle-kit journal entry and snapshot were never committed — the next `drizzle-kit generate` would've diffed against the stale 0002 snapshot and regenerated a duplicate migration | Committed both metadata files |
+| I2 | The signed OAuth `state` proved only "the server issued this recently," not "this browser started the flow" — since `/connect` is public, an attacker could run it themselves and hand a victim a valid state+code pair that replaces the victim's Gmail connection with the attacker's | Added a double-submit nonce cookie (HttpOnly/Secure/SameSite=Lax), embedded in the signed state and verified with a timing-safe comparison; still no new secret, no session storage |
+| I3 | Budget debounce compared the new threshold to the last one by *equality*, not rank — escalating 80%→100% worked only by accident, and dropping 100%→80% then re-crossing re-fired the lower threshold, contradicting the plan's own "don't re-alert the same crossing" ruling | Thresholds are now ranked (80 < 100); a threshold alerts only if it outranks the last one alerted this month |
+| I4 | A non-CSV file and a zero-data-row file both returned 201 as if something was imported — contradicting the plan's own Review Focus item for statement uploads | Both now rejected (400/422) before calling the importer; the already-tested "unrecognized columns → quarantine, 201" case (the established app-wide pattern) was left untouched |
+
+**Flagged, not fixed — product/scope decisions, not implementation oversights:**
+- **I5** — bill reminders don't recur automatically; once `next_due_date` passes, a bill stops being reminded until you manually update it via the CRUD route. This was a deliberate plan-level scope call for v1 ("once the user updates next_due_date… the reminder can fire again"), not a bug introduced this phase. Revisit if you want auto-advancing due dates (needs an `expectedInterval` enum + calendar-math rollover) — worth deciding before or during Phase 8's bills UI.
+- **I6** — every route mounted this phase (budgets, bills, capture, `/auth/gmail`) still has no authentication, widening the same gap Phase 6 flagged. This is the same open item below, not a new decision — your existing "not yet, before deploy" answer still stands, but the surface it covers is now much larger, including the ability to replace the Gmail connection entirely.
+
+**Deferred minors** (ledgered, not fixed): a PATCH on budgets/bills with an empty/unrecognized body throws instead of 400; budget PATCH doesn't reset its debounce state (a renamed/raised budget can be mis-debounced); no uniqueness constraint on `budgets.category`; notification emails print raw integer cents instead of formatted currency; `POST /capture/backfill` returns a bare 500 (not a clean 409/502) on a revoked refresh token; `GET /capture/health` leaks internal-only fields; the trends `?month=` validation is format-only (accepts `2026-13`); a stale test name in `index.test.ts` mentions `/statements` without testing it; missing coverage for a resolved dedup pair being counted, a DB-level CHECK rejection, and a bill created already overdue; one `sendNotification` failure during the 6-hour cron stops the rest of that run (no data lost, just delayed).
+
+**221/221 tests passing** (up from 214), clean `tsc --noEmit`. Merged to `master` (fast, clean merge; branch + worktree deleted after verifying the merged result's tests/build stayed green).
+
+---
+
 ## Still ahead
 
-- **Phase 7** (next step) — trends, budgets, bill reminders, remaining API
-  routes (including mounting `authGmail.ts`, at which point I6(b)'s
-  deferred CSRF `state` parameter must be addressed), and the deferred
-  statement-import chunking/resumability design.
-- **Phase 8** — frontend. Per explicit user instruction, use the
+- **Phase 8** (next step) — frontend. Per explicit user instruction, use the
   Emil Kowalski / `emil-design-eng` and related animation/design skills
   (installed in `.claude/skills/` and `.agents/skills/`) when building it.
+  The API surface is now fully mounted and stable, per the spec's own
+  note that Phase 8 starts "once the API surface from prior phases is
+  stable."
 
 ## Open items flagged to the user (not yet resolved)
 
@@ -338,16 +374,27 @@ Scope: the third, manual capture path (CUJ 3) for anything neither Gmail nor a b
   after.
   **User decision (2026-11-03):** keep building for now; address auth
   specifically before any real deployment, not before Phase 7.
+  **Still open as of Phase 7:** the surface this covers is now much
+  larger — budgets, bills, statement upload, manual capture trigger, and
+  `/auth/gmail` (which can replace the stored Gmail connection outright)
+  are all mounted with no auth layer. The decision itself is unchanged;
+  flagging the growing blast radius so it's weighed before Phase 8 or any
+  deploy, whichever comes first.
 - Spec correction needed: `string-similarity`/Jaro-Winkler reference
   (Phase 3) — the package is deprecated and implements a different
   algorithm than claimed.
-- OAuth CSRF `state` parameter must be added before `authGmail.ts` is
-  ever mounted/exposed publicly (Phase 7/8).
-- Statement-import chunking/resumability for large files should be
-  designed together with Phase 7's upload route, not bolted on after.
+- Recurring bill reminders don't auto-advance (Phase 7, I5) — once
+  `next_due_date` passes, a bill stops reminding until manually updated
+  via the CRUD route. Deliberate v1 scope call in the plan, not a bug;
+  revisit if auto-recurrence (weekly/monthly/yearly rollover) is wanted,
+  likely alongside Phase 8's bills UI.
+- Statement-import chunking/resumability for large files was not
+  addressed in Phase 7 (the upload route is a single synchronous parse)
+  — still open if large-file support is needed.
 - Watchdog notification debounce (I4) and first-failure grace period
-  (I5) — both need a new `capture_runs` column; natural to bundle with
-  Phase 7's notification preferences work rather than a one-off migration.
+  (I5) — both need a new `capture_runs` column; still unaddressed, no
+  longer bundled with any specific upcoming phase now that Phase 7's
+  notification work (budget/bill alerts) is done.
 - All of Phase 0-1's and Phase 2-3's deferred minors (see each section
   above) remain unaddressed — none are blocking, all are cheap to pick
   up when next touching their files.
