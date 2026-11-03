@@ -275,12 +275,47 @@ Fix commit: all 6 Critical + 5 Important + 2 Minor findings fixed in one TDD pas
 
 ---
 
+## Phase 6: Missed-transaction fallback — merged to master
+
+**Plan:** `docs/superpowers/plans/2026-11-03-missed-transaction-fallback.md`
+**Branch:** `worktree-missed-transactions` (merged, deleted)
+
+Scope: the third, manual capture path (CUJ 3) for anything neither Gmail nor a bank statement ever sees, plus the app's first transaction-management API — list, get, correct a category, resolve a dedup candidate pair.
+
+**Plan-level rulings:**
+- Manual-missed category is always auto-assigned at logging time (via the existing `categorize()`), never user-supplied in that same request — correction happens afterward through the same `PATCH /transactions/:id/category` route every other source uses.
+- The spec names `resolve-dedup`'s three resolution values (`kept`/`discarded`/`confirmed_distinct`) but doesn't spell out which value lands on which side of the pair. Resolved as: `kept` on the target writes `discarded`+soft-delete on its counterpart (and vice versa for `discarded`); `confirmed_distinct` writes the same value to both, deletes neither.
+- `transactions.ts` and `missedTransactions.ts` are mounted into the real `app` — the first HTTP routes this project has ever actually exposed (`authGmail.ts` remains deliberately unmounted, a separate, earlier CSRF deferral).
+
+**Work completed (4 tasks, all committed):**
+1. `manualAdapter.ts` + `missedTransactions.ts` — validates input, auto-categorizes, writes a `committed` `manual_missed` row with `provenance: "{}"`, never dedup-checked.
+2. `transactions.ts` — `GET /` (list, excludes soft-deleted, optional `?reviewStatus=` filter), `GET /:id`, `PATCH /:id/category`.
+3. Same file — `POST /:id/resolve-dedup`.
+4. Mounted both route files into `index.ts`'s real `app`.
+
+**Final review (fresh-context Agent, opus) — 1 Critical + 5 Important + several Minor findings:**
+
+| # | Finding | Fix |
+|---|---|---|
+| C1 | `resolve-dedup` had no state guard — resolving the same pair a *second* time (a changed mind, a double-click, or the frontend targeting the other side of an already-resolved pair) could soft-delete **both** halves of a real transaction, with a 200 response and no error | Added a `dedupResolution !== "pending"` guard returning 409 |
+| I2 | The date regex accepted calendar-impossible values like `"2026-02-31"` — JS's `Date` normalizes these rather than throwing | Added a round-trip check through `Date` to catch what the regex alone can't |
+| I3 | Malformed JSON on `PATCH /:id/category` and `POST /:id/resolve-dedup` threw uncaught → Hono's default 500, inconsistent with `missedTransactions.ts`'s own existing try/catch | Wrapped both in try/catch, returning 400 |
+| I4 | `PATCH /:id/category` never validated `category` — a missing one threw a confusing 500 from Drizzle ("no values to set"); an empty string would have silently upserted a junk `category_rules` entry | Validates a non-empty trimmed string, 400 otherwise |
+| I5 | `missedTransactions.ts` mapped *every* error to 400, including a genuine server fault (e.g. a D1 outage) — misreporting it as the caller's fault | Added a `ValidationError` class that only `manualAdapter`'s own input checks throw; the route maps only that to 400, rethrows everything else |
+
+**Flagged, not fixed — a project-wide gap, not a Phase 6 regression:** the reviewer correctly pointed out that mounting these routes creates the app's *first-ever* reachable, **unauthenticated** HTTP surface — full read/write access to the transaction ledger (including bank-email excerpts in quarantined rows' `provenance`) with no auth layer in front of it. This has no spec requirement anywhere (the design doc never designs API auth) and the app isn't deployed anywhere yet (`wrangler.toml` still has a placeholder D1 `database_id`), so it wasn't treated as a Phase 6 merge-blocker — but it **must be resolved before any real deployment**. See "Open items flagged to the user" below; this needs a decision only you can make (Cloudflare Access in front of the Worker vs. a bearer-secret middleware vs. something else), not something to pick unilaterally.
+
+**Deferred minors** (ledgered, not fixed): amount/vendor input coercion edge cases (`Number()`/`String()` accept more than they should), `:id` params not validated as positive integers, a missing dedup counterpart returning 400 instead of 409/500, the category-correction read-then-write not being atomic (low risk, single-user), no `ORDER BY` tiebreaker or pagination on the list endpoint.
+
+**168/168 tests passing** (up from 161), clean `tsc --noEmit`. Merged to `master` (fast-forward; branch + worktree deleted after verifying the merged result's tests/build stayed green).
+
+---
+
 ## Still ahead
 
-- **Phase 6** (next step) — missed-transaction fallback (manual adapter, routes).
-- **Phase 7** — trends, budgets, bill reminders, remaining API routes
-  (including mounting `authGmail.ts`, at which point I6(b)'s deferred
-  CSRF `state` parameter must be addressed), and the deferred
+- **Phase 7** (next step) — trends, budgets, bill reminders, remaining API
+  routes (including mounting `authGmail.ts`, at which point I6(b)'s
+  deferred CSRF `state` parameter must be addressed), and the deferred
   statement-import chunking/resumability design.
 - **Phase 8** — frontend. Per explicit user instruction, use the
   Emil Kowalski / `emil-design-eng` and related animation/design skills
@@ -288,6 +323,19 @@ Fix commit: all 6 Critical + 5 Important + 2 Minor findings fixed in one TDD pas
 
 ## Open items flagged to the user (not yet resolved)
 
+- **API authentication — must resolve before any real deployment.**
+  Phase 6 mounted this project's first-ever reachable HTTP routes
+  (`/transactions`, `/missed-transactions`), and there is still no auth
+  layer in front of them. As soon as this is deployed to a public
+  `workers.dev` or custom domain, the full transaction ledger — amounts,
+  vendors, and quarantined Gmail rows' raw subject/body excerpts — is
+  readable and writable by anyone with the URL. The design doc never
+  specifies an API-auth mechanism (single-user app, no spec gap I
+  introduced), so this needs your decision: Cloudflare Access in front
+  of the Worker (no code change) vs. a bearer-secret middleware on the
+  Hono `app` (a few lines) vs. something else. More routes will mount in
+  Phase 7, widening this same gap — worth deciding before Phase 7, not
+  after.
 - Spec correction needed: `string-similarity`/Jaro-Winkler reference
   (Phase 3) — the package is deprecated and implements a different
   algorithm than claimed.
