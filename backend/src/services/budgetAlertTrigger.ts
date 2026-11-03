@@ -25,6 +25,17 @@ function currentMonthStart(): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
+// [Final review I3] thresholds are ranked, not just compared for equality:
+// the debounce must suppress re-alerting the *same* crossing again, not
+// suppress a *new, higher* crossing within the same month, and must not
+// re-fire a *lower* one after spending drops back down.
+const THRESHOLD_RANK: Record<string, number> = { "80": 1, "100": 2 };
+
+function alreadyAlertedAtOrAbove(threshold: string, lastAlertedThreshold: string | null): boolean {
+  if (!lastAlertedThreshold) return false;
+  return THRESHOLD_RANK[lastAlertedThreshold] >= THRESHOLD_RANK[threshold];
+}
+
 export async function evaluateBudgets(
   db: DrizzleD1Database,
   env: Partial<ConfigEnv>
@@ -51,7 +62,8 @@ export async function evaluateBudgets(
 
     const threshold = percent >= 1 ? "100" : percent >= 0.8 ? "80" : null;
     if (threshold === null) continue;
-    if (threshold === budget.lastAlertedThreshold && monthStart === budget.lastAlertedPeriodStart) continue;
+    const sameMonth = monthStart === budget.lastAlertedPeriodStart;
+    if (sameMonth && alreadyAlertedAtOrAbove(threshold, budget.lastAlertedThreshold)) continue;
 
     await sendNotification(env, {
       subject: `Budget alert: ${budget.category} at ${threshold}% of limit`,
