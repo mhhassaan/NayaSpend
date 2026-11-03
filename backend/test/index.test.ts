@@ -224,3 +224,20 @@ describe("queue handler", () => {
     expect(message.ack).toHaveBeenCalledOnce();
   });
 });
+
+describe("app routing", () => {
+  test("the real app (not just the standalone route instances) serves /transactions and /missed-transactions", async () => {
+    const listRes = await worker.fetch(new Request("https://example.com/transactions"), testEnv);
+    expect(listRes.status).toBe(200);
+
+    const postRes = await worker.fetch(
+      new Request("https://example.com/missed-transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendorRaw: "Corner Store", amountCents: 1000, date: "2026-10-27" }),
+      }),
+      testEnv
+    );
+    expect(postRes.status).toBe(201);
+  });
+});

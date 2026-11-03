@@ -8,6 +8,8 @@ import { checkCaptureHealth } from "./services/watchdog";
 import { refreshAccessToken } from "./services/gmailTokenRefresh";
 import { loadConfig, type ConfigEnv } from "./config";
 import { decryptToken, encryptToken } from "./security";
+import { transactionsRoutes } from "./routes/transactions";
+import { missedTransactionsRoutes } from "./routes/missedTransactions";
 
 type Env = ConfigEnv & {
   DB: D1Database;
@@ -47,6 +49,8 @@ async function buildGmailClientFromStoredCredentials(env: Env) {
 }
 
 const app = new Hono<{ Bindings: Env }>();
+app.route("/transactions", transactionsRoutes);
+app.route("/missed-transactions", missedTransactionsRoutes);
 
 async function recordDispatchFailure(env: Env, err: unknown) {
   const db = drizzle(env.DB);
