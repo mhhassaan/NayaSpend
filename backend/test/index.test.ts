@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, test, vi } from "vitest";
 import worker from "../src/index";
 import { captureRuns, gmailCredentials } from "../src/db/schema";
-import { encryptToken } from "../src/security";
+import { decryptToken, encryptToken } from "../src/security";
 
 const testEnv = {
   ...env,
@@ -52,8 +52,72 @@ describe("scheduled handler", () => {
     expect(run.lastAttemptedRun).not.toBeNull();
   });
 
+  test("[C6] an expired access token is refreshed before use, and the new token is persisted", async () => {
+    const db = drizzle(env.DB);
+    const [credentials] = await db
+      .insert(gmailCredentials)
+      .values({
+        encryptedAccessToken: await encryptToken("stale-access-token", testEnv.TOKEN_ENCRYPTION_KEY),
+        encryptedRefreshToken: await encryptToken("real-refresh-token", testEnv.TOKEN_ENCRYPTION_KEY),
+        expiresAt: new Date(Date.now() - 60_000).toISOString(), // already expired
+      })
+      .returning();
+    const fetchSpy = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "https://oauth2.googleapis.com/token") {
+        const body = new URLSearchParams(init?.body as string);
+        expect(body.get("grant_type")).toBe("refresh_token");
+        expect(body.get("refresh_token")).toBe("real-refresh-token");
+        return new Response(JSON.stringify({ access_token: "fresh-access-token", expires_in: 3600 }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ messages: [] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const controller = { cron: "0 * * * *", scheduledTime: Date.now() } as ScheduledController;
+    const ctx = createExecutionContext();
+    await worker.scheduled!(controller, testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    const [updatedCredentials] = await db.select().from(gmailCredentials);
+    const newAccessToken = await decryptToken(updatedCredentials.encryptedAccessToken, testEnv.TOKEN_ENCRYPTION_KEY);
+    expect(newAccessToken).toBe("fresh-access-token");
+    expect(new Date(updatedCredentials.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(updatedCredentials.id).toBe(credentials.id);
+    const [run] = await db.select().from(captureRuns);
+    expect(run.runStatus).toBe("success");
+  });
+
+  test("[C6] a revoked refresh token records an auth_failure instead of crashing the scheduled handler", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(gmailCredentials).values({
+      encryptedAccessToken: await encryptToken("stale-access-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      encryptedRefreshToken: await encryptToken("revoked-refresh-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }))
+    );
+
+    const controller = { cron: "0 * * * *", scheduledTime: Date.now() } as ScheduledController;
+    const ctx = createExecutionContext();
+    await worker.scheduled!(controller, testEnv, ctx);
+    await waitOnExecutionContext(ctx);
+
+    const [run] = await db.select().from(captureRuns);
+    expect(run.runStatus).toBe("api_call_failed");
+    expect(run.errorType).toBe("auth_failure");
+  });
+
   test("the watchdog cron actually calls the notification engine when capture_runs shows a failure", async () => {
     const db = drizzle(env.DB);
+    await db.insert(gmailCredentials).values({
+      encryptedAccessToken: await encryptToken("real-access-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      encryptedRefreshToken: await encryptToken("real-refresh-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
     await db.insert(captureRuns).values({ runStatus: "job_did_not_run" });
     const fetchSpy = vi.fn(async (url: string) => {
       expect(url).toBe("https://api.resend.com/emails");
@@ -71,6 +135,11 @@ describe("scheduled handler", () => {
 
   test("the watchdog cron does not notify when capture is healthy", async () => {
     const db = drizzle(env.DB);
+    await db.insert(gmailCredentials).values({
+      encryptedAccessToken: await encryptToken("real-access-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      encryptedRefreshToken: await encryptToken("real-refresh-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
     const now = new Date().toISOString();
     await db.insert(captureRuns).values({ runStatus: "success", lastAttemptedRun: now, lastSuccessfulRun: now });
     const fetchSpy = vi.fn();
@@ -94,5 +163,64 @@ describe("scheduled handler", () => {
     await waitOnExecutionContext(ctx);
 
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("queue handler", () => {
+  function fakeMessage(attempt: number) {
+    return { body: { attempt }, ack: vi.fn(), retry: vi.fn() };
+  }
+
+  test("[I7] passes the retried attempt number through to runCaptureScheduler and acks on success", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(gmailCredentials).values({
+      encryptedAccessToken: await encryptToken("real-access-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      encryptedRefreshToken: await encryptToken("real-refresh-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ messages: [] }), { status: 200 }))
+    );
+    const message = fakeMessage(2);
+    const batch = { messages: [message] } as unknown as MessageBatch<{ attempt: number }>;
+
+    await worker.queue!(batch, testEnv);
+
+    expect(message.ack).toHaveBeenCalledOnce();
+    expect(message.retry).not.toHaveBeenCalled();
+    const [run] = await db.select().from(captureRuns);
+    expect(run.runStatus).toBe("success");
+  });
+
+  test("[I7] acks even when processing throws, so the platform never stacks its own retry on top of the app-level one", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(gmailCredentials).values({
+      encryptedAccessToken: await encryptToken("real-access-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      encryptedRefreshToken: await encryptToken("real-refresh-token", testEnv.TOKEN_ENCRYPTION_KEY),
+      expiresAt: new Date(Date.now() - 60_000).toISOString(), // expired -- forces a refresh attempt
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("", { status: 500 })) // refresh itself fails unexpectedly
+    );
+    const message = fakeMessage(2);
+    const batch = { messages: [message] } as unknown as MessageBatch<{ attempt: number }>;
+
+    await worker.queue!(batch, testEnv);
+
+    expect(message.ack).toHaveBeenCalledOnce();
+    expect(message.retry).not.toHaveBeenCalled();
+    const [run] = await db.select().from(captureRuns);
+    expect(run.runStatus).toBe("api_call_failed");
+  });
+
+  test("[I7] a message with no Gmail account connected is acked and does nothing", async () => {
+    const message = fakeMessage(2);
+    const batch = { messages: [message] } as unknown as MessageBatch<{ attempt: number }>;
+
+    await worker.queue!(batch, testEnv);
+
+    expect(message.ack).toHaveBeenCalledOnce();
   });
 });

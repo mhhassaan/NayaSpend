@@ -32,4 +32,24 @@ describe("sendNotification", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 500 })));
     await expect(sendNotification(testEnv, { subject: "x", body: "y" })).rejects.toThrow();
   });
+
+  test("[M2] still sends when every Gmail secret is missing -- only depends on its own two secrets", async () => {
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await sendNotification(
+      { RESEND_API_KEY: "test-resend-key", NOTIFICATION_EMAIL: "user@example.com" },
+      { subject: "x", body: "y" }
+    );
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  test("[M2] throws a clear error when its own required secrets are missing, before ever calling fetch", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(sendNotification({}, { subject: "x", body: "y" })).rejects.toThrow(/RESEND_API_KEY|NOTIFICATION_EMAIL/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

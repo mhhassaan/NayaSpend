@@ -18,12 +18,16 @@ binding = "CAPTURE_RETRY_QUEUE"
 [[queues.consumers]]
 queue = "capture-retry"
 max_batch_size = 1
+# The retry chain is already app-level (captureScheduler.ts's own
+# queue.send calls with explicit 60/300/900s backoff). max_retries = 0
+# so Cloudflare's own platform-level redelivery can't stack a second,
+# uncoordinated retry chain on top of that one.
+max_retries = 0
 
-# Three Cron Triggers, all currently dispatching to the placeholder
-# `scheduled` export in src/index.ts (Task 1, Step 5). Each will be wired
-# to its real handler (captureScheduler, watchdog, budget/bill evaluation)
-# in later build phases, per the design doc's Detailed Implementation Plan
-# item 1 and item 26.
+# Three Cron Triggers, dispatched in src/index.ts's scheduled() handler
+# to their real implementations: captureScheduler (hourly), watchdog
+# (hourly, offset 30 min). The third (every 6 hours) is still an
+# intentional no-op until Phase 7 builds budget/bill evaluation.
 [triggers]
 crons = [
   "0 * * * *",    # hourly: Capture Scheduler

@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { captureRuns } from "../db/schema";
 import { runBackfill, runOngoingPoll } from "../adapters/gmailAdapter";
+import { GmailApiError } from "../adapters/gmailClient";
 import type { GmailClient } from "../adapters/gmailClient";
 
 export type QueueSender = {
@@ -10,7 +12,7 @@ export type QueueSender = {
   send(message: unknown, options: { delaySeconds: number }): Promise<unknown>;
 };
 
-const MAX_ATTEMPTS = 3;
+const MAX_RETRIES = 3; // 3 retries on top of the original attempt -- 4 total runs
 const RETRY_DELAYS_SECONDS = [60, 300, 900]; // 1 min, 5 min, 15 min
 
 /**
@@ -36,10 +38,25 @@ export async function runCaptureScheduler(
     } else {
       await runBackfill(db, client);
     }
-  } catch {
-    // runBackfill/runOngoingPoll already catch and record GmailApiError
-    // internally (per Phase 2/Task 3) rather than throwing -- this catch
-    // only guards against an unexpected error escaping that handling.
+  } catch (err) {
+    // runBackfill/runOngoingPoll already catch and record every Gmail API
+    // failure internally (per Phase 2/Task 3) rather than throwing -- this
+    // catch is for the genuinely unexpected case (e.g. getCurrentHistoryId
+    // throwing while seeding, a D1 error, a bug in categorize/parse). Those
+    // must still be recorded here: left unrecorded, run_status keeps its
+    // previous value, so neither the retry below nor the Watchdog's own
+    // staleness check would ever see this run as having failed.
+    const [existing] = await db.select().from(captureRuns);
+    if (existing) {
+      await db
+        .update(captureRuns)
+        .set({
+          lastAttemptedRun: new Date().toISOString(),
+          runStatus: "api_call_failed",
+          errorType: err instanceof GmailApiError ? err.errorType : "unknown",
+        })
+        .where(eq(captureRuns.id, existing.id));
+    }
   }
 
   const [refreshed] = await db.select().from(captureRuns);
@@ -47,7 +64,15 @@ export async function runCaptureScheduler(
     return; // succeeded -- nothing to retry
   }
 
-  if (attempt > MAX_ATTEMPTS) {
+  if (refreshed.errorType === "auth_failure") {
+    // The credential itself is broken (expired/revoked refresh token, or
+    // access-token refresh failed) -- retrying with the same broken
+    // credential cannot succeed. Go straight to the Watchdog rather than
+    // spending 3 retries finding that out.
+    return;
+  }
+
+  if (attempt > MAX_RETRIES) {
     return; // Watchdog's own cron picks this up from here
   }
 

@@ -5,7 +5,12 @@
 // parameter), so there is no code path that can issue an unscoped read.
 export const NAYAPAY_QUERY = 'from:nayapay.com subject:"You spent"';
 
-export type GmailErrorType = "auth_failure" | "rate_limit" | "network_timeout" | "unknown";
+export type GmailErrorType =
+  | "auth_failure"
+  | "rate_limit"
+  | "network_timeout"
+  | "history_expired"
+  | "unknown";
 
 export class GmailApiError extends Error {
   readonly status: number;
@@ -49,8 +54,9 @@ export type GmailClient = {
   getMessage(id: string): Promise<GmailMessage>;
   listHistory(
     startHistoryId: string,
-    maxResults: number
-  ): Promise<{ addedMessageIds: string[]; newHistoryId: string }>;
+    maxResults: number,
+    pageToken?: string
+  ): Promise<{ addedMessageIds: string[]; newHistoryId: string; nextPageToken?: string }>;
   getCurrentHistoryId(): Promise<string>;
 };
 
@@ -128,25 +134,39 @@ export function createGmailClient(accessToken: string): GmailClient {
       };
     },
 
-    async listHistory(startHistoryId, maxResults) {
+    async listHistory(startHistoryId, maxResults, pageToken) {
       const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
       url.searchParams.set("startHistoryId", startHistoryId);
       url.searchParams.set("maxResults", String(maxResults));
       url.searchParams.set("historyTypes", "messageAdded");
+      // Scoped to INBOX as a cheap first filter -- the authoritative
+      // NayaPay-sender/subject check still happens per-message in
+      // gmailAdapter.ts, since history.list cannot take a `q` search.
+      url.searchParams.set("labelId", "INBOX");
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
 
       const response = await fetch(url.toString(), { headers: authHeaders });
-      if (!response.ok) await throwForFailedResponse(response);
+      if (!response.ok) {
+        // A too-old startHistoryId (long outage, expired watermark) comes
+        // back as 404, distinct from every other failure -- the caller
+        // can't just retry this one, it must reseed its watermark.
+        if (response.status === 404) {
+          throw new GmailApiError(404, "history_expired", "Gmail history watermark is no longer valid");
+        }
+        await throwForFailedResponse(response);
+      }
 
       const json = (await response.json()) as {
         history?: { messagesAdded?: { message: { id: string } }[] }[];
         historyId?: string;
+        nextPageToken?: string;
       };
 
       const addedMessageIds = (json.history ?? []).flatMap(
         (entry) => entry.messagesAdded?.map((added) => added.message.id) ?? []
       );
 
-      return { addedMessageIds, newHistoryId: json.historyId ?? startHistoryId };
+      return { addedMessageIds, newHistoryId: json.historyId ?? startHistoryId, nextPageToken: json.nextPageToken };
     },
 
     async getCurrentHistoryId() {

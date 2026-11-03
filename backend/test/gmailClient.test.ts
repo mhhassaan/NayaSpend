@@ -169,6 +169,50 @@ describe("createGmailClient", () => {
     await expect(client.listHistory("100", 50)).rejects.toMatchObject({ errorType: "auth_failure" });
   });
 
+  test("[C1] listHistory scopes to the INBOX label", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.get("labelId")).toBe("INBOX");
+      return new Response(JSON.stringify({ historyId: "100" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = createGmailClient("fake-access-token");
+
+    await client.listHistory("100", 50);
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  test("[C2] listHistory passes a pageToken through and returns the response's nextPageToken", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.get("pageToken")).toBe("page2");
+      return new Response(JSON.stringify({ historyId: "150", nextPageToken: "page3" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = createGmailClient("fake-access-token");
+
+    const result = await client.listHistory("100", 50, "page2");
+
+    expect(result.nextPageToken).toBe("page3");
+  });
+
+  test("[C2] listHistory omits pageToken from the request when none is given", async () => {
+    const fetchSpy = vi.fn(async (url: string) => {
+      expect(new URL(url).searchParams.has("pageToken")).toBe(false);
+      return new Response(JSON.stringify({ historyId: "100" }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const client = createGmailClient("fake-access-token");
+
+    await client.listHistory("100", 50);
+  });
+
+  test("[I1] listHistory throws errorType 'history_expired' on a 404 (startHistoryId too old), distinct from other failures", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
+    const client = createGmailClient("fake-access-token");
+
+    await expect(client.listHistory("100", 50)).rejects.toMatchObject({ errorType: "history_expired" });
+  });
+
   test("getCurrentHistoryId calls users.getProfile and returns its historyId", async () => {
     const fetchSpy = vi.fn(async (url: string) => {
       expect(url).toContain("profile");

@@ -1,5 +1,5 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { captureRuns } from "../db/schema";
+import { captureRuns, gmailCredentials } from "../db/schema";
 import { sendNotification } from "./notificationEngine";
 import type { ConfigEnv } from "../config";
 
@@ -31,20 +31,40 @@ export async function checkCaptureHealth(
   env: Partial<ConfigEnv>
 ): Promise<{ escalated: boolean }> {
   const [run] = await db.select().from(captureRuns);
+  const [credentials] = await db.select().from(gmailCredentials);
 
-  if (!run || run.runStatus === "success") {
+  // Nothing connected yet -- there is no job that should be running, so
+  // silence is healthy, not an error.
+  if (!credentials) {
     return { escalated: false };
   }
 
   const now = Date.now();
-  const lastAttempted = run.lastAttemptedRun ? new Date(run.lastAttemptedRun).getTime() : null;
-  const lastSuccessful = run.lastSuccessfulRun ? new Date(run.lastSuccessfulRun).getTime() : null;
+  const lastAttempted = run?.lastAttemptedRun ? new Date(run.lastAttemptedRun).getTime() : null;
+  const attemptsAreStale = lastAttempted === null || now - lastAttempted >= MISSED_RUN_THRESHOLD_MS;
 
-  const neverAttempted = lastAttempted === null;
+  if (!run || run.runStatus === "success") {
+    // A connected account means capture should be attempting a run every
+    // hour, success or failure -- lastAttemptedRun is updated on every
+    // single path through runBackfill/runOngoingPoll/the scheduler's own
+    // failure handling. A frozen "success" looks healthy by status alone,
+    // so this is the only way to tell the cron has actually stopped
+    // firing entirely rather than just not finding anything new.
+    if (attemptsAreStale) {
+      await sendNotification(env, {
+        subject: "NayaSpend: Gmail capture issue",
+        body: "The Gmail sync job hasn't run recently.",
+      });
+      return { escalated: true };
+    }
+    return { escalated: false };
+  }
+
+  const lastSuccessful = run.lastSuccessfulRun ? new Date(run.lastSuccessfulRun).getTime() : null;
   const missedTwoConsecutiveRuns =
     lastSuccessful === null || now - lastSuccessful >= MISSED_RUN_THRESHOLD_MS;
 
-  if (!neverAttempted && !missedTwoConsecutiveRuns) {
+  if (!missedTwoConsecutiveRuns) {
     // Only one run has failed so far -- within the 2-consecutive-miss
     // window, not yet an escalation.
     return { escalated: false };
