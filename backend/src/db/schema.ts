@@ -79,7 +79,14 @@ export const budgets = sqliteTable("budgets", {
   category: text("category").notNull(),
   limitAmount: integer("limit_amount").notNull(),
   periodType: text("period_type").notNull(),
-});
+  lastAlertedThreshold: text("last_alerted_threshold"),
+  lastAlertedPeriodStart: text("last_alerted_period_start"),
+}, (table) => ({
+  limitAmountIsPositiveInteger: check(
+    "limit_amount_is_positive_integer",
+    sql`${table.limitAmount} = CAST(${table.limitAmount} AS INTEGER) AND ${table.limitAmount} > 0`
+  ),
+}));
 
 export const bills = sqliteTable("bills", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -87,4 +94,10 @@ export const bills = sqliteTable("bills", {
   expectedAmount: integer("expected_amount").notNull(),
   expectedInterval: text("expected_interval").notNull(),
   nextDueDate: text("next_due_date").notNull(),
-});
+  lastReminderSentForDueDate: text("last_reminder_sent_for_due_date"),
+}, (table) => ({
+  expectedAmountIsPositiveInteger: check(
+    "expected_amount_is_positive_integer",
+    sql`${table.expectedAmount} = CAST(${table.expectedAmount} AS INTEGER) AND ${table.expectedAmount} > 0`
+  ),
+}));
