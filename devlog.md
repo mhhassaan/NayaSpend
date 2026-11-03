@@ -336,6 +336,8 @@ Scope: the third, manual capture path (CUJ 3) for anything neither Gmail nor a b
   Hono `app` (a few lines) vs. something else. More routes will mount in
   Phase 7, widening this same gap — worth deciding before Phase 7, not
   after.
+  **User decision (2026-11-03):** keep building for now; address auth
+  specifically before any real deployment, not before Phase 7.
 - Spec correction needed: `string-similarity`/Jaro-Winkler reference
   (Phase 3) — the package is deprecated and implements a different
   algorithm than claimed.
