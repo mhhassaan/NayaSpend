@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { logMissedTransaction } from "../adapters/manualAdapter";
+import { logMissedTransaction, ValidationError } from "../adapters/manualAdapter";
 
 type Env = {
   DB: D1Database;
@@ -25,6 +25,12 @@ missedTransactionsRoutes.post("/", async (c) => {
     });
     return c.json(result, 201);
   } catch (err) {
-    return c.text((err as Error).message, 400);
+    // Only a validation failure is the caller's fault (400) -- anything
+    // else (a D1 error, a bug in categorize) is a real server error and
+    // must not be reported, or mistaken for, a bad request.
+    if (err instanceof ValidationError) {
+      return c.text(err.message, 400);
+    }
+    throw err;
   }
 });

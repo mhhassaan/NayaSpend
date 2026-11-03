@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, test } from "vitest";
-import { logMissedTransaction } from "../src/adapters/manualAdapter";
+import { logMissedTransaction, ValidationError } from "../src/adapters/manualAdapter";
 import { transactions } from "../src/db/schema";
 
 describe("logMissedTransaction", () => {
@@ -36,6 +36,27 @@ describe("logMissedTransaction", () => {
     const db = drizzle(env.DB);
     await expect(logMissedTransaction(db, { vendorRaw: "x", amountCents: 100, date: "10/27/2026" })).rejects.toThrow();
     await expect(logMissedTransaction(db, { vendorRaw: "x", amountCents: 100, date: "" })).rejects.toThrow();
+  });
+
+  test("[I2] rejects a calendar-impossible date, not just a wrong format", async () => {
+    const db = drizzle(env.DB);
+    await expect(logMissedTransaction(db, { vendorRaw: "x", amountCents: 100, date: "2026-02-31" })).rejects.toThrow();
+    await expect(logMissedTransaction(db, { vendorRaw: "x", amountCents: 100, date: "2026-13-01" })).rejects.toThrow();
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(0);
+  });
+
+  test("[I5] every validation failure throws ValidationError specifically, distinguishable from an unexpected error", async () => {
+    const db = drizzle(env.DB);
+    await expect(logMissedTransaction(db, { vendorRaw: "", amountCents: 100, date: "2026-10-27" })).rejects.toBeInstanceOf(
+      ValidationError
+    );
+    await expect(logMissedTransaction(db, { vendorRaw: "x", amountCents: -1, date: "2026-10-27" })).rejects.toBeInstanceOf(
+      ValidationError
+    );
+    await expect(logMissedTransaction(db, { vendorRaw: "x", amountCents: 100, date: "bad" })).rejects.toBeInstanceOf(
+      ValidationError
+    );
   });
 
   test("rejects an empty vendor", async () => {

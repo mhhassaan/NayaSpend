@@ -50,7 +50,17 @@ transactionsRoutes.patch("/:id/category", async (c) => {
     return c.text("not found", 404);
   }
 
-  const { category } = await c.req.json<{ category: string }>();
+  let body: { category?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text("Request body must be valid JSON", 400);
+  }
+  const category = typeof body.category === "string" ? body.category.trim() : "";
+  if (!category) {
+    return c.text("category must be a non-empty string", 400);
+  }
+
   await db.update(transactions).set({ category }).where(eq(transactions.id, id));
   await correctCategory(db, row.vendorNormalized, category);
 
@@ -61,7 +71,13 @@ transactionsRoutes.post("/:id/resolve-dedup", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
 
-  const { action } = await c.req.json<{ action: string }>();
+  let body: { action?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text("Request body must be valid JSON", 400);
+  }
+  const action = body.action;
   if (!DEDUP_ACTIONS.includes(action as DedupAction)) {
     return c.text(`action must be one of: ${DEDUP_ACTIONS.join(", ")}`, 400);
   }
@@ -72,6 +88,15 @@ transactionsRoutes.post("/:id/resolve-dedup", async (c) => {
   }
   if (!target.dedupGroupId) {
     return c.text("transaction has no dedup_group_id to resolve", 400);
+  }
+  if (target.dedupResolution !== "pending") {
+    // Already resolved one way or another -- re-resolving (a double
+    // submission, a changed mind, or the frontend targeting the other
+    // side of the same pair) must never be allowed to silently
+    // overwrite a settled outcome. Without this guard, resolving the
+    // *other* side of an already-resolved pair can soft-delete both
+    // rows (e.g. kept->kept on each side in turn discards both).
+    return c.text("this dedup pair has already been resolved", 409);
   }
 
   const [counterpart] = await db

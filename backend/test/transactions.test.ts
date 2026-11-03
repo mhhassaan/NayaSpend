@@ -94,6 +94,40 @@ describe("transactions routes", () => {
     expect(res.status).toBe(404);
   });
 
+  test("[I3] PATCH /:id/category with malformed JSON returns 400, not a 500", async () => {
+    const db = drizzle(env.DB);
+    const row = await seed(db);
+
+    const res = await transactionsRoutes.request(
+      `/${row.id}/category`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "not json" },
+      env
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  test("[I4] PATCH /:id/category with an empty or missing category returns 400 and changes nothing", async () => {
+    const db = drizzle(env.DB);
+    const row = await seed(db, { category: "Uncategorized" });
+
+    const emptyRes = await transactionsRoutes.request(
+      `/${row.id}/category`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ category: "   " }) },
+      env
+    );
+    const missingRes = await transactionsRoutes.request(
+      `/${row.id}/category`,
+      { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) },
+      env
+    );
+
+    expect(emptyRes.status).toBe(400);
+    expect(missingRes.status).toBe(400);
+    const [unchanged] = await db.select().from(transactions).where(eq(transactions.id, row.id));
+    expect(unchanged.category).toBe("Uncategorized");
+  });
+
   async function seedDedupPair(db: ReturnType<typeof drizzle>) {
     const groupId = "test-group-1";
     const [a] = await db
@@ -183,6 +217,34 @@ describe("transactions routes", () => {
     expect(updatedB.deletedAt).toBeNull();
   });
 
+  test("[C1] resolving the same pair a second time returns 409 and does not touch either row again", async () => {
+    const db = drizzle(env.DB);
+    const { a, b } = await seedDedupPair(db);
+
+    await transactionsRoutes.request(
+      `/${a.id}/resolve-dedup`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "kept" }) },
+      env
+    );
+
+    // Someone changes their mind, or double-clicks, or the frontend
+    // targets the other side of the pair -- re-resolving must not be
+    // able to soft-delete both halves of a real transaction.
+    const secondRes = await transactionsRoutes.request(
+      `/${b.id}/resolve-dedup`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "kept" }) },
+      env
+    );
+
+    expect(secondRes.status).toBe(409);
+    const [updatedA] = await db.select().from(transactions).where(eq(transactions.id, a.id));
+    const [updatedB] = await db.select().from(transactions).where(eq(transactions.id, b.id));
+    expect(updatedA.dedupResolution).toBe("kept");
+    expect(updatedA.deletedAt).toBeNull();
+    expect(updatedB.dedupResolution).toBe("discarded");
+    expect(updatedB.deletedAt).not.toBeNull();
+  });
+
   test("POST /:id/resolve-dedup on a transaction with no dedup_group_id returns 400, not a crash", async () => {
     const db = drizzle(env.DB);
     const row = await seed(db); // no dedupGroupId
@@ -190,6 +252,19 @@ describe("transactions routes", () => {
     const res = await transactionsRoutes.request(
       `/${row.id}/resolve-dedup`,
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "kept" }) },
+      env
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  test("[I3] POST /:id/resolve-dedup with malformed JSON returns 400, not a 500", async () => {
+    const db = drizzle(env.DB);
+    const { a } = await seedDedupPair(db);
+
+    const res = await transactionsRoutes.request(
+      `/${a.id}/resolve-dedup`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: "not json" },
       env
     );
 
