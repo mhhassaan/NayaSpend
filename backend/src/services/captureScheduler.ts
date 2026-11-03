@@ -4,7 +4,10 @@ import { runBackfill, runOngoingPoll } from "../adapters/gmailAdapter";
 import type { GmailClient } from "../adapters/gmailClient";
 
 export type QueueSender = {
-  send(message: unknown, options: { delaySeconds: number }): Promise<void>;
+  // Cloudflare's real Queue.send() resolves with a QueueSendResponse;
+  // the fake queues used in tests resolve with undefined. Neither value
+  // is used by the caller.
+  send(message: unknown, options: { delaySeconds: number }): Promise<unknown>;
 };
 
 const MAX_ATTEMPTS = 3;
