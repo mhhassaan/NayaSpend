@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { Budgets } from "./Budgets";
 import { renderWithProviders, mockFetch, jsonResponse, urlContains } from "../../test/helpers";
-import { showSuccess } from "../components";
+import { showError, showSuccess } from "../components";
 
 vi.mock("../components", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../components")>();
@@ -55,6 +55,25 @@ describe("Budgets", () => {
     expect(spy.mock.calls.every(([, init]) => (init?.method ?? "GET") !== "POST")).toBe(true);
   });
 
+  test("creating a budget converts the typed rupee amount to cents before posting", async () => {
+    const spy = mockFetch([
+      { test: urlContains("/api/budgets", "GET"), respond: () => jsonResponse([]) },
+      { test: urlContains("/api/trends", "GET"), respond: () => jsonResponse(trendsResponse()) },
+      { test: urlContains("/api/budgets", "POST"), respond: () => jsonResponse({ id: 1, category: "Rent", limitAmount: 500000, periodType: "monthly" }, 201) },
+    ]);
+    renderWithProviders(<Budgets />);
+    await userEvent.click(await screen.findByRole("button", { name: /create budget/i }));
+    await userEvent.type(screen.getByLabelText(/category/i), "Rent");
+    await userEvent.type(screen.getByLabelText(/limit/i), "5000");
+    await userEvent.click(screen.getByRole("button", { name: /save/i }));
+    await vi.waitFor(() => {
+      const postCall = spy.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(postCall).toBeDefined();
+      const body = JSON.parse(postCall![1]!.body as string);
+      expect(body.limitAmount).toBe(500000);
+    });
+  });
+
   test("[break-ui] spending past the limit shows a percentage over 100% instead of clamping or breaking", async () => {
     mockFetch([
       { test: urlContains("/api/budgets", "GET"), respond: () => jsonResponse([{ id: 1, category: "Coffee", limitAmount: 10000, periodType: "monthly", lastAlertedThreshold: null, lastAlertedPeriodStart: null }]) },
@@ -65,6 +84,16 @@ describe("Budgets", () => {
     ]);
     renderWithProviders(<Budgets />);
     expect(await screen.findByText(/142%/)).toBeInTheDocument();
+  });
+
+  test("[Review Focus] a failed page load shows the error block and toasts once", async () => {
+    mockFetch([
+      { test: urlContains("/api/budgets", "GET"), respond: () => new Response("fail", { status: 500 }) },
+      { test: urlContains("/api/trends", "GET"), respond: () => jsonResponse(trendsResponse()) },
+    ]);
+    renderWithProviders(<Budgets />);
+    expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
+    await vi.waitFor(() => expect(showError).toHaveBeenCalledOnce());
   });
 
   test("deleting a budget asks for confirmation before calling delete", async () => {

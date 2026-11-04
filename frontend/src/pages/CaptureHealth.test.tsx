@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { CaptureHealth } from "./CaptureHealth";
 import { renderWithProviders, mockFetch, jsonResponse, urlContains } from "../../test/helpers";
-import { showSuccess } from "../components";
+import { showError, showSuccess } from "../components";
 
 vi.mock("../components", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../components")>();
@@ -52,6 +52,14 @@ describe("CaptureHealth", () => {
     expect(await screen.findByText(/gmail connected/i)).toBeInTheDocument();
   });
 
+  test("[Review Focus] landing with ?connected=1 does not also show the stale 'not connected yet' state", async () => {
+    mockFetch([{ test: urlContains("/api/capture/health", "GET"), respond: () => jsonResponse(healthResponse({})) }]);
+    renderWithProviders(<CaptureHealth />, { initialEntries: ["/capture-health?connected=1"] });
+    await screen.findByText(/gmail connected/i);
+    expect(screen.queryByText(/not connected yet/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/first sync pending/i)).toBeInTheDocument();
+  });
+
   test("[Review Focus] landing with ?error=exchange_failed shows the specific named failure, not a generic message", async () => {
     mockFetch([{ test: urlContains("/api/capture/health", "GET"), respond: () => jsonResponse(healthResponse({})) }]);
     renderWithProviders(<CaptureHealth />, { initialEntries: ["/capture-health?error=exchange_failed"] });
@@ -71,6 +79,13 @@ describe("CaptureHealth", () => {
     renderWithProviders(<CaptureHealth />);
     expect(await screen.findByText(/gmail sync is failing/i)).toBeInTheDocument();
     expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
+  });
+
+  test("[Review Focus] a failed page load shows the error block and toasts once", async () => {
+    mockFetch([{ test: urlContains("/api/capture/health", "GET"), respond: () => new Response("fail", { status: 500 }) }]);
+    renderWithProviders(<CaptureHealth />);
+    expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
+    await vi.waitFor(() => expect(showError).toHaveBeenCalledOnce());
   });
 
   test("a manual backfill trigger calls the backfill endpoint and toasts its result", async () => {

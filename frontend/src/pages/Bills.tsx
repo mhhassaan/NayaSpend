@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { Button, Card, EmptyState, Modal, Pill, showError, showSuccess } from "../components";
 import type { Bill } from "../types/transaction";
+import { formatCents, parseRupeesToCents } from "../utils/money";
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -13,16 +14,12 @@ function isValidIsoDate(date: string): boolean {
   return new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date;
 }
 
-function formatCents(cents: number): string {
-  return `Rs. ${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 type BillFormState = { vendor: string; expectedAmount: string; expectedInterval: string; nextDueDate: string };
 
 function validateBillForm(form: BillFormState): string | null {
   if (!form.vendor.trim()) return "vendor must be a non-empty string";
-  const expectedAmount = Number(form.expectedAmount);
-  if (!Number.isInteger(expectedAmount) || expectedAmount <= 0) {
+  const expectedAmountCents = parseRupeesToCents(form.expectedAmount);
+  if (!Number.isFinite(expectedAmountCents) || expectedAmountCents <= 0) {
     return "expectedAmount must be a positive integer";
   }
   if (!isValidIsoDate(form.nextDueDate)) {
@@ -45,7 +42,7 @@ function BillFormFields({ form, onChange }: { form: BillFormState; onChange: (fo
         />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="font-body text-[13px] font-semibold text-text-secondary">Expected amount</span>
+        <span className="font-body text-[13px] font-semibold text-text-secondary">Expected amount (Rs.)</span>
         <input
           aria-label="Expected amount"
           type="text"
@@ -85,7 +82,7 @@ function CreateBillForm({ onDone }: { onDone: () => void }) {
   const mutation = useMutation({
     mutationFn: async () => {
       const args = {
-        json: { vendor: form.vendor, expectedAmount: Number(form.expectedAmount), expectedInterval: form.expectedInterval, nextDueDate: form.nextDueDate },
+        json: { vendor: form.vendor, expectedAmount: parseRupeesToCents(form.expectedAmount), expectedInterval: form.expectedInterval, nextDueDate: form.nextDueDate },
       };
       const res = await apiClient.bills.$post(args);
       if (!res.ok) throw new Error((await res.text()) || `Failed to create bill (${res.status})`);
@@ -126,7 +123,7 @@ function CreateBillForm({ onDone }: { onDone: () => void }) {
 function EditBillForm({ bill, onDone }: { bill: Bill; onDone: () => void }) {
   const [form, setForm] = useState<BillFormState>({
     vendor: bill.vendor,
-    expectedAmount: String(bill.expectedAmount),
+    expectedAmount: String(bill.expectedAmount / 100),
     expectedInterval: bill.expectedInterval,
     nextDueDate: bill.nextDueDate,
   });
@@ -137,7 +134,7 @@ function EditBillForm({ bill, onDone }: { bill: Bill; onDone: () => void }) {
     mutationFn: async () => {
       const args = {
         param: { id: String(bill.id) },
-        json: { vendor: form.vendor, expectedAmount: Number(form.expectedAmount), expectedInterval: form.expectedInterval, nextDueDate: form.nextDueDate },
+        json: { vendor: form.vendor, expectedAmount: parseRupeesToCents(form.expectedAmount), expectedInterval: form.expectedInterval, nextDueDate: form.nextDueDate },
       };
       const res = await apiClient.bills[":id"].$patch(args);
       if (!res.ok) throw new Error((await res.text()) || `Failed to update bill (${res.status})`);

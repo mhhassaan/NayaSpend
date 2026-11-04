@@ -418,6 +418,21 @@ describe("transactions routes", () => {
     expect(res.status).toBe(400);
   });
 
+  test("resolve-review commit on a zero-amount (still-quarantined-placeholder) row returns 400", async () => {
+    const db = drizzle(env.DB);
+    const row = await seed(db, { amount: 0, reviewStatus: "pending_review" });
+
+    const res = await transactionsRoutes.request(
+      `/${row.id}/resolve-review`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "commit" }) },
+      env
+    );
+
+    expect(res.status).toBe(400);
+    const [unchanged] = await db.select().from(transactions).where(eq(transactions.id, row.id));
+    expect(unchanged.reviewStatus).toBe("pending_review");
+  });
+
   test("resolve-review on a nonexistent id returns 404", async () => {
     const res = await transactionsRoutes.request(
       "/999/resolve-review",

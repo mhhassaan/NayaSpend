@@ -1,8 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { Button, Card, EmptyState, showError, showSuccess } from "../components";
 import type { Transaction } from "../types/transaction";
+import { formatCents } from "../utils/money";
+import { maskAccountNumbers } from "../utils/mask";
+
+function displayVendor(transaction: Transaction): string {
+  return transaction.source === "statement_import" ? maskAccountNumbers(transaction.vendorRaw) : transaction.vendorRaw;
+}
 
 type DedupAction = "kept" | "discarded" | "confirmed_distinct";
 
@@ -21,10 +27,6 @@ function groupPairs(transactions: Transaction[]): [Transaction, Transaction][] {
   return pairs;
 }
 
-function formatCents(cents: number): string {
-  return `Rs. ${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 export function DedupReview() {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -38,19 +40,25 @@ export function DedupReview() {
     },
   });
 
+  async function resolveDedupPair(id: number, action: DedupAction) {
+    const args = { param: { id: String(id) }, json: { action } };
+    const res = await apiClient.transactions[":id"]["resolve-dedup"].$post(args);
+    if (!res.ok) throw new Error(`Failed to resolve dedup pair (${res.status})`);
+    return res.json();
+  }
+
   const resolveMutation = useMutation({
-    mutationFn: async ({ id, action }: { id: number; action: DedupAction }) => {
-      const args = { param: { id: String(id) }, json: { action } };
-      const res = await apiClient.transactions[":id"]["resolve-dedup"].$post(args);
-      if (!res.ok) throw new Error(`Failed to resolve dedup pair (${res.status})`);
-      return res.json();
-    },
+    mutationFn: ({ id, action }: { id: number; action: DedupAction }) => resolveDedupPair(id, action),
     onSuccess: () => {
       showSuccess("Resolved");
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
     },
     onError: () => showError("Couldn't resolve this pair."),
   });
+
+  useEffect(() => {
+    if (query.isError) showError("Couldn't load duplicate candidates.");
+  }, [query.isError]);
 
   if (query.isPending) {
     return (
@@ -92,12 +100,31 @@ export function DedupReview() {
     });
   }
 
+  // Bulk-resolving is limited to "confirmed_distinct" -- "kept" discards
+  // the *other* side of the pair, and there is no per-pair UI here to say
+  // which side that should be, so applying it in bulk would soft-delete an
+  // arbitrary row (whichever the API happened to list first). Marking a
+  // batch as distinct is the one action safe to apply without that choice.
   async function resolveSelected() {
+    let succeeded = 0;
+    let failed = 0;
     for (const groupId of selected) {
       const pair = pairs.find(([a]) => a.dedupGroupId === groupId);
-      if (pair) await resolveMutation.mutateAsync({ id: pair[0].id, action: "kept" });
+      if (!pair) continue;
+      try {
+        await resolveDedupPair(pair[0].id, "confirmed_distinct");
+        succeeded++;
+      } catch {
+        failed++;
+      }
     }
     setSelected(new Set());
+    queryClient.invalidateQueries({ queryKey: ["transactions"] });
+    if (failed === 0) {
+      showSuccess(`Confirmed ${succeeded} pair${succeeded === 1 ? "" : "s"} as distinct`);
+    } else {
+      showError(`Confirmed ${succeeded} pair${succeeded === 1 ? "" : "s"}, ${failed} failed`);
+    }
   }
 
   return (
@@ -105,7 +132,7 @@ export function DedupReview() {
       <div className="flex items-center justify-between">
         <p className="font-body text-[18px] font-semibold">Duplicate candidates</p>
         <Button variant="primary" disabled={selected.size === 0} onClick={resolveSelected}>
-          Resolve selected
+          Confirm selected as distinct
         </Button>
       </div>
 
@@ -123,7 +150,7 @@ export function DedupReview() {
           <div className="grid grid-cols-2 gap-3">
             {[a, b].map((t) => (
               <Card key={t.id}>
-                <p className="font-body font-semibold">{t.vendorRaw}</p>
+                <p className="font-body font-semibold">{displayVendor(t)}</p>
                 <p className="font-body text-[13px] text-text-secondary">
                   {t.source} — {formatCents(t.amount)} — {t.date}
                 </p>

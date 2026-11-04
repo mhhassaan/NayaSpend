@@ -163,6 +163,15 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
       return c.json({ resolved: "reject", matched: false });
     }
 
+    // A quarantined row starts as a zero-amount placeholder (see
+    // gmailAdapter.ts/statementAdapter.ts's buildQuarantinedRow) -- the
+    // frontend is required to PATCH real values in before committing.
+    // Reject a commit that skipped that edit rather than writing junk
+    // into the ledger.
+    if (!(row.amount > 0)) {
+      return c.text("amount must be a positive integer before this row can be committed", 400);
+    }
+
     await db.update(transactions).set({ reviewStatus: "committed" }).where(eq(transactions.id, id));
     // Committing a quarantined row makes it eligible for dedup comparison for
     // the first time -- the spec requires re-running the check immediately

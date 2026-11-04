@@ -38,9 +38,19 @@ const ERROR_REASON_MESSAGES: Record<string, string> = {
   missing_refresh_token: "Google didn't grant offline access — try reconnecting.",
 };
 
-function StatusSection({ health }: { health: CaptureHealthData }) {
+function StatusSection({ health, justConnected }: { health: CaptureHealthData; justConnected: boolean }) {
   if (health.runStatus === "success") {
     return <Pill tone="success">Connected</Pill>;
+  }
+
+  // The OAuth callback (authGmail.ts) redirects here with ?connected=1 the
+  // instant the token exchange succeeds -- before the hourly cron has had
+  // a chance to run a first sync, so `health` still reads exactly like a
+  // fresh, never-connected install. Trust the just-happened redirect over
+  // that stale server snapshot instead of showing "not connected yet" and
+  // "Gmail connected" in the same breath.
+  if (justConnected && health.runStatus === "job_did_not_run") {
+    return <Pill tone="success">Connected — first sync pending</Pill>;
   }
 
   if (health.errorType === "auth_failure") {
@@ -164,7 +174,7 @@ export function CaptureHealth() {
 
       <Card>
         <div className="flex flex-col gap-4">
-          <StatusSection health={health} />
+          <StatusSection health={health} justConnected={connected} />
 
           <div className="flex items-center gap-3">
             <Button variant="secondary" onClick={() => backfillMutation.mutate()}>

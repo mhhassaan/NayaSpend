@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { Button, Card, EmptyState, Modal, StatDisplay, showError, showSuccess } from "../components";
 import type { Budget } from "../types/transaction";
+import { formatCents, parseRupeesToCents } from "../utils/money";
 
 type MonthlyTrends = {
   month: string;
@@ -13,10 +14,6 @@ type MonthlyTrends = {
 
 function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
-}
-
-function formatCents(cents: number): string {
-  return `Rs. ${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function spentFor(category: string, trends: MonthlyTrends): number {
@@ -31,7 +28,7 @@ function CreateBudgetForm({ onDone }: { onDone: () => void }) {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const limitAmount = Number(limit);
+      const limitAmount = parseRupeesToCents(limit);
       const args = { json: { category, limitAmount, periodType: "monthly" as const } };
       const res = await apiClient.budgets.$post(args);
       if (!res.ok) throw new Error((await res.text()) || `Failed to create budget (${res.status})`);
@@ -49,7 +46,7 @@ function CreateBudgetForm({ onDone }: { onDone: () => void }) {
   });
 
   function handleSave() {
-    const limitAmount = Number(limit);
+    const limitAmount = parseRupeesToCents(limit);
     // Mirrors the backend's own validation message (budgets.ts) so the
     // inline error reads the same whether it came from this client-side
     // check or a server rejection.
@@ -73,7 +70,7 @@ function CreateBudgetForm({ onDone }: { onDone: () => void }) {
         />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="font-body text-[13px] font-semibold text-text-secondary">Limit</span>
+        <span className="font-body text-[13px] font-semibold text-text-secondary">Limit (Rs.)</span>
         <input
           aria-label="Limit"
           type="text"
@@ -92,12 +89,12 @@ function CreateBudgetForm({ onDone }: { onDone: () => void }) {
 }
 
 function LimitEditor({ budget, onDone }: { budget: Budget; onDone: () => void }) {
-  const [value, setValue] = useState(String(budget.limitAmount));
+  const [value, setValue] = useState(String(budget.limitAmount / 100));
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const limitAmount = Number(value);
+      const limitAmount = parseRupeesToCents(value);
       const args = { param: { id: String(budget.id) }, json: { limitAmount } };
       const res = await apiClient.budgets[":id"].$patch(args);
       if (!res.ok) throw new Error((await res.text()) || `Failed to update budget (${res.status})`);

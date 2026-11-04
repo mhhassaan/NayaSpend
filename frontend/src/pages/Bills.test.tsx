@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { Bills } from "./Bills";
 import { renderWithProviders, mockFetch, jsonResponse, urlContains } from "../../test/helpers";
-import { showSuccess } from "../components";
+import { showError, showSuccess } from "../components";
 import type { Bill } from "../types/transaction";
 
 vi.mock("../components", async (importOriginal) => {
@@ -48,6 +48,53 @@ describe("Bills", () => {
     await userEvent.click(screen.getByRole("button", { name: /save/i }));
     expect(await screen.findByText(/valid.*date/i)).toBeInTheDocument();
     expect(spy.mock.calls.every(([, init]) => (init?.method ?? "GET") !== "POST")).toBe(true);
+  });
+
+  test("creating a bill converts the typed rupee amount to cents before posting", async () => {
+    const spy = mockFetch([
+      { test: urlContains("/api/bills", "GET"), respond: () => jsonResponse([]) },
+      { test: urlContains("/api/bills", "POST"), respond: () => jsonResponse(buildBill({ id: 2, vendor: "Spotify", expectedAmount: 50000 }), 201) },
+    ]);
+    renderWithProviders(<Bills />);
+    await userEvent.click(await screen.findByRole("button", { name: /add bill/i }));
+    await userEvent.type(screen.getByLabelText(/vendor/i), "Spotify");
+    await userEvent.type(screen.getByLabelText(/expected amount/i), "500");
+    await userEvent.type(screen.getByLabelText(/expected interval/i), "monthly");
+    await userEvent.type(screen.getByLabelText(/next due date/i), "2026-12-01");
+    await userEvent.click(screen.getByRole("button", { name: /save/i }));
+    await vi.waitFor(() => {
+      const postCall = spy.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(postCall).toBeDefined();
+      const body = JSON.parse(postCall![1]!.body as string);
+      expect(body.expectedAmount).toBe(50000);
+    });
+  });
+
+  test("editing a bill's expected amount pre-fills the rupee value and converts back to cents on save", async () => {
+    const spy = mockFetch([
+      { test: urlContains("/api/bills", "GET"), respond: () => jsonResponse([buildBill({ id: 1, expectedAmount: 150000 })]) },
+      { test: urlContains("/api/bills/1", "PATCH"), respond: () => jsonResponse(buildBill({ id: 1, expectedAmount: 200000 })) },
+    ]);
+    renderWithProviders(<Bills />);
+    await userEvent.click(await screen.findByRole("button", { name: /edit/i }));
+    const amountInput = screen.getByLabelText(/expected amount/i) as HTMLInputElement;
+    expect(amountInput.value).toBe("1500");
+    await userEvent.clear(amountInput);
+    await userEvent.type(amountInput, "2000");
+    await userEvent.click(screen.getByRole("button", { name: /save/i }));
+    await vi.waitFor(() => {
+      const patchCall = spy.mock.calls.find(([, init]) => init?.method === "PATCH");
+      expect(patchCall).toBeDefined();
+      const body = JSON.parse(patchCall![1]!.body as string);
+      expect(body.expectedAmount).toBe(200000);
+    });
+  });
+
+  test("[Review Focus] a failed page load shows the error block and toasts once", async () => {
+    mockFetch([{ test: urlContains("/api/bills", "GET"), respond: () => new Response("fail", { status: 500 }) }]);
+    renderWithProviders(<Bills />);
+    expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
+    await vi.waitFor(() => expect(showError).toHaveBeenCalledOnce());
   });
 
   test("[break-ui] a long vendor name and a huge expected amount render in full", async () => {
