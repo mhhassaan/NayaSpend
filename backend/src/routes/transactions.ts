@@ -3,6 +3,10 @@ import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { transactions } from "../db/schema";
 import { correctCategory, normalize } from "../services/categorizationEngine";
+import { runDedupCheck } from "../services/dedupEngine";
+
+const RESOLVE_REVIEW_ACTIONS = ["commit", "reject"] as const;
+type ResolveReviewAction = (typeof RESOLVE_REVIEW_ACTIONS)[number];
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -128,6 +132,42 @@ transactionsRoutes.patch("/:id/category", async (c) => {
   await correctCategory(db, row.vendorNormalized, category);
 
   return c.json({ id, category });
+});
+
+transactionsRoutes.post("/:id/resolve-review", async (c) => {
+  const id = Number(c.req.param("id"));
+  const db = drizzle(c.env.DB);
+  const [row] = await db.select().from(transactions).where(eq(transactions.id, id));
+
+  if (!row) {
+    return c.text("not found", 404);
+  }
+
+  let body: { action?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.text("Request body must be valid JSON", 400);
+  }
+  const action = body.action;
+  if (!RESOLVE_REVIEW_ACTIONS.includes(action as ResolveReviewAction)) {
+    return c.text(`action must be one of: ${RESOLVE_REVIEW_ACTIONS.join(", ")}`, 400);
+  }
+  if (row.reviewStatus !== "pending_review") {
+    return c.text("this transaction is not pending review", 400);
+  }
+
+  if (action === "reject") {
+    await db.update(transactions).set({ deletedAt: new Date().toISOString() }).where(eq(transactions.id, id));
+    return c.json({ resolved: "reject", matched: false });
+  }
+
+  await db.update(transactions).set({ reviewStatus: "committed" }).where(eq(transactions.id, id));
+  // Committing a quarantined row makes it eligible for dedup comparison for
+  // the first time -- the spec requires re-running the check immediately
+  // against the now-larger committed set, not waiting for some other event.
+  const { matched } = await runDedupCheck(db, id);
+  return c.json({ resolved: "commit", matched });
 });
 
 transactionsRoutes.post("/:id/resolve-dedup", async (c) => {

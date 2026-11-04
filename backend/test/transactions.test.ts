@@ -334,4 +334,96 @@ describe("transactions routes", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  test("[Review Focus] resolve-review commit re-runs the dedup check and reports a match", async () => {
+    const db = drizzle(env.DB);
+    // An already-committed statement-sourced row with no pair yet.
+    await seed(db, {
+      amount: 500, date: "2026-10-10", vendorRaw: "Daraz", vendorNormalized: "daraz",
+      category: "Shopping", source: "statement_import", reviewStatus: "committed",
+    });
+    // A quarantined gmail-sourced row that matches it on amount/date/vendor once committed.
+    const quarantined = await seed(db, {
+      amount: 500, date: "2026-10-11", vendorRaw: "Daraz", vendorNormalized: "daraz",
+      category: "Shopping", source: "gmail_email", reviewStatus: "pending_review",
+    });
+
+    const res = await transactionsRoutes.request(
+      `/${quarantined.id}/resolve-review`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "commit" }) },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { resolved: string; matched: boolean };
+    expect(body).toEqual({ resolved: "commit", matched: true });
+    const [updated] = await db.select().from(transactions).where(eq(transactions.id, quarantined.id));
+    expect(updated.reviewStatus).toBe("committed");
+    expect(updated.dedupGroupId).not.toBeNull();
+  });
+
+  test("resolve-review commit with no dedup match reports matched: false", async () => {
+    const db = drizzle(env.DB);
+    const row = await seed(db, { reviewStatus: "pending_review" });
+
+    const res = await transactionsRoutes.request(
+      `/${row.id}/resolve-review`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "commit" }) },
+      env
+    );
+
+    const body = (await res.json()) as { matched: boolean };
+    expect(body.matched).toBe(false);
+  });
+
+  test("resolve-review reject soft-deletes without committing", async () => {
+    const db = drizzle(env.DB);
+    const row = await seed(db, { reviewStatus: "pending_review" });
+
+    const res = await transactionsRoutes.request(
+      `/${row.id}/resolve-review`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reject" }) },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const [updated] = await db.select().from(transactions).where(eq(transactions.id, row.id));
+    expect(updated.reviewStatus).toBe("pending_review");
+    expect(updated.deletedAt).not.toBeNull();
+  });
+
+  test("resolve-review on an already-committed row returns 400", async () => {
+    const db = drizzle(env.DB);
+    const row = await seed(db, { reviewStatus: "committed" });
+
+    const res = await transactionsRoutes.request(
+      `/${row.id}/resolve-review`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "commit" }) },
+      env
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  test("resolve-review with an invalid action returns 400", async () => {
+    const db = drizzle(env.DB);
+    const row = await seed(db, { reviewStatus: "pending_review" });
+
+    const res = await transactionsRoutes.request(
+      `/${row.id}/resolve-review`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve" }) },
+      env
+    );
+
+    expect(res.status).toBe(400);
+  });
+
+  test("resolve-review on a nonexistent id returns 404", async () => {
+    const res = await transactionsRoutes.request(
+      "/999/resolve-review",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "commit" }) },
+      env
+    );
+    expect(res.status).toBe(404);
+  });
 });
