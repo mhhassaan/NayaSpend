@@ -6,6 +6,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Transactions } from "./pages/Transactions";
 import { DedupReview } from "./pages/DedupReview";
 import { LogMissedTransaction } from "./pages/LogMissedTransaction";
+import { StatementUpload } from "./pages/StatementUpload";
 
 // Plain data, no router instance created here -- `createBrowserRouter`
 // (main.tsx) and `createMemoryRouter` (tests) each attach their own
@@ -31,6 +32,7 @@ export const routes: RouteObject[] = [
       { path: "transactions", element: <Transactions /> },
       { path: "dedup-review", element: <DedupReview /> },
       { path: "log-transaction", element: <LogMissedTransaction /> },
+      { path: "statement-upload", element: <StatementUpload /> },
       { path: "*", element: <NotFound /> },
     ],
   },
