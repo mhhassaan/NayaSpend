@@ -10,6 +10,7 @@ import {
   malformedLayoutEmail,
   pkrFormatEmail,
   promoEmailNoAmount,
+  realWorldSpendEmail,
 } from "./fixtures/nayapayEmails";
 import type { GmailClient, GmailMessage } from "../src/adapters/gmailClient";
 
@@ -39,6 +40,15 @@ describe("parseNayaPayEmail", () => {
   test("a malformed/unexpected body layout is low-confidence, not thrown", () => {
     const result = parseNayaPayEmail(malformedLayoutEmail);
     expect(result.confidence).toBe("low");
+  });
+
+  test("[real-world] parses NayaPay's actual 'You spent' email template (Amount Paid / Merchant Details labels, no 'spent' in the body)", () => {
+    const result = parseNayaPayEmail(realWorldSpendEmail);
+    expect(result.confidence).toBe("high");
+    if (result.confidence === "high") {
+      expect(result.amountCents).toBe(247100);
+      expect(result.vendorRaw).toContain("KHAYABAN PHARMACYY");
+    }
   });
 
   test("a 'PKR 1250' amount with no decimal point still parses to 125000 cents", () => {

@@ -128,6 +128,75 @@ describe("createGmailClient", () => {
     expect(message.bodyText).toBe("Plain part body");
   });
 
+  test("[real-world] getMessage finds text/plain nested inside a multipart/alternative wrapped in multipart/mixed (an inline-image attachment pushes the real parts one level deeper)", async () => {
+    const fetchSpy = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "m3",
+          threadId: "t3",
+          internalDate: "1730000000000",
+          payload: {
+            headers: [
+              { name: "Subject", value: "You spent Rs. 2,471 at KHAYABAN PHARMACYY Lahore PK" },
+              { name: "From", value: "NayaPay <service@nayapay.com>" },
+            ],
+            mimeType: "multipart/mixed",
+            parts: [
+              {
+                mimeType: "multipart/alternative",
+                parts: [
+                  { mimeType: "text/plain", body: { data: base64url("Amount Paid Rs. 2,471") } },
+                  { mimeType: "text/html", body: { data: base64url("<p>Amount Paid Rs. 2,471</p>") } },
+                ],
+              },
+              { mimeType: "image/png", body: { data: base64url("fake-inline-banner-bytes") } },
+            ],
+          },
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = createGmailClient("fake-access-token");
+    const message = await client.getMessage("m3");
+
+    expect(message.bodyText).toBe("Amount Paid Rs. 2,471");
+  });
+
+  test("[real-world] getMessage falls back to the HTML part, stripped of tags, when no text/plain part exists anywhere", async () => {
+    const fetchSpy = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "m4",
+          threadId: "t4",
+          internalDate: "1730000000000",
+          payload: {
+            headers: [
+              { name: "Subject", value: "You spent Rs. 500 at Daraz" },
+              { name: "From", value: "NayaPay <service@nayapay.com>" },
+            ],
+            mimeType: "multipart/related",
+            parts: [
+              { mimeType: "text/html", body: { data: base64url("<div>Amount Paid<br/>Rs. 500</div>") } },
+              { mimeType: "image/png", body: { data: base64url("fake-logo-bytes") } },
+            ],
+          },
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = createGmailClient("fake-access-token");
+    const message = await client.getMessage("m4");
+
+    expect(message.bodyText).toContain("Amount Paid");
+    expect(message.bodyText).toContain("Rs. 500");
+    expect(message.bodyText).not.toContain("<div>");
+    expect(message.bodyText).not.toContain("<br");
+  });
+
   test("listHistory calls users.history.list with startHistoryId and returns added message ids + new watermark", async () => {
     const fetchSpy = vi.fn(async (url: string) => {
       expect(url).toContain("startHistoryId=100");

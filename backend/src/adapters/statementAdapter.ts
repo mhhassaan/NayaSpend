@@ -8,7 +8,7 @@ export type ParsedCsvRow =
   | { rowIndex: number; confidence: "high"; amountCents: number; date: string; vendorRaw: string }
   | { rowIndex: number; confidence: "low"; reason: string };
 
-const DATE_HEADER_PATTERN = /date/i;
+const DATE_HEADER_PATTERN = /date|timestamp/i;
 const VENDOR_HEADER_PATTERN = /desc|memo|vendor|merchant/i;
 const AMOUNT_HEADER_PATTERN = /amount|debit|credit/i;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,7 +26,7 @@ function findHeader(headers: string[], pattern: RegExp): string | undefined {
 }
 
 function parseAmountToCents(raw: string): number | null {
-  const trimmed = raw.trim();
+  const trimmed = raw.trim().replace(/^\+/, "");
   const isParenthesized = /^\(.*\)$/.test(trimmed);
   const unwrapped = trimmed.replace(/[()]/g, "").trim();
   // Currency markers only ever appear as a prefix in the formats this
@@ -43,13 +43,52 @@ function parseAmountToCents(raw: string): number | null {
   return Math.round(signedValue * 100);
 }
 
+const MONTH_ABBREVIATIONS: Record<string, string> = {
+  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+// NayaPay's real export timestamps look like "01 Oct 2026 03:32 PM" --
+// day, a textual month, year, optionally followed by a time. Only the
+// date portion is kept (transactions.date is a date, not a timestamp).
+const DD_MON_YYYY_PATTERN = /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})\b/;
+
 function normalizeIsoDate(raw: string): string | null {
   const trimmed = raw.trim();
-  return ISO_DATE_PATTERN.test(trimmed) ? trimmed : null;
+  if (ISO_DATE_PATTERN.test(trimmed)) return trimmed;
+
+  const match = trimmed.match(DD_MON_YYYY_PATTERN);
+  if (!match) return null;
+  const [, day, monthName, year] = match;
+  const month = MONTH_ABBREVIATIONS[monthName.slice(0, 3).toLowerCase()];
+  if (!month) return null;
+  return `${year}-${month}-${day.padStart(2, "0")}`;
+}
+
+// A real NayaPay export's transaction table doesn't start on line 1 --
+// it's preceded by ~10 lines of account-summary preamble (customer name,
+// address, account number, IBAN, opening/closing balance, ...). None of
+// those lines contain embedded newlines, so a plain line split is safe
+// here purely to locate the real header row; the actual data (which can
+// have multi-line quoted DESCRIPTION fields) is still parsed by papaparse
+// from that point on.
+function findHeaderLineIndex(csvText: string): number {
+  const lines = csvText.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const fields = lines[i].split(",").map((f) => f.trim());
+    const hasDate = fields.some((f) => DATE_HEADER_PATTERN.test(f));
+    const hasVendor = fields.some((f) => VENDOR_HEADER_PATTERN.test(f));
+    const hasAmount = fields.some((f) => AMOUNT_HEADER_PATTERN.test(f));
+    if (hasDate && hasVendor && hasAmount) return i;
+  }
+  return -1;
 }
 
 export function parseStatementCsv(csvText: string, _fileRef: string): ParsedCsvRow[] {
-  const parsed = Papa.parse<Record<string, string>>(csvText, {
+  const headerLineIndex = findHeaderLineIndex(csvText);
+  const tableText =
+    headerLineIndex <= 0 ? csvText : csvText.split(/\r?\n/).slice(headerLineIndex).join("\n");
+
+  const parsed = Papa.parse<Record<string, string>>(tableText, {
     header: true,
     skipEmptyLines: true,
   });
@@ -86,7 +125,7 @@ export function parseStatementCsv(csvText: string, _fileRef: string): ParsedCsvR
       return { rowIndex, confidence: "low" as const, reason: "unparseable date" };
     }
 
-    const vendorRaw = row[vendorHeader];
+    const vendorRaw = row[vendorHeader]?.split(/\r?\n/)[0]?.trim();
     if (!vendorRaw) {
       return { rowIndex, confidence: "low" as const, reason: "missing vendor/description" };
     }

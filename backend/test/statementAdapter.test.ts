@@ -11,6 +11,7 @@ import {
   garbageAmountCsv,
   mixedCsv,
   nonIsoDateCsv,
+  realWorldNayaPayCsv,
   rsFormatCsv,
   trailingMinusCsv,
   unrecognizedColumnsCsv,
@@ -56,6 +57,38 @@ describe("parseStatementCsv", () => {
     const rows = parseStatementCsv(nonIsoDateCsv, "file-noniso");
     expect(rows).toHaveLength(1);
     expect(rows[0].confidence).toBe("low");
+  });
+
+  test("[real-world] skips the account-summary preamble and finds the real TIMESTAMP/TYPE/DESCRIPTION/AMOUNT/BALANCE header row", () => {
+    const rows = parseStatementCsv(realWorldNayaPayCsv, "file-real");
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.confidence === "high")).toBe(true);
+  });
+
+  test("[real-world] parses NayaPay's real 'DD Mon YYYY HH:MM AM/PM' timestamp into an ISO date", () => {
+    const rows = parseStatementCsv(realWorldNayaPayCsv, "file-real");
+    const row = rows[0];
+    expect(row.confidence).toBe("high");
+    if (row.confidence === "high") {
+      expect(row.date).toBe("2026-10-01");
+    }
+  });
+
+  test("[real-world] an outgoing transfer's multi-line, Transaction-ID-bearing DESCRIPTION is reduced to its first line as the vendor", () => {
+    const rows = parseStatementCsv(realWorldNayaPayCsv, "file-real");
+    const row = rows[0];
+    expect(row.confidence).toBe("high");
+    if (row.confidence === "high") {
+      expect(row.vendorRaw).toBe("Outgoing fund transfer to John Smith");
+    }
+  });
+
+  test("[real-world] a negative ('-2,300') and a '+'-prefixed incoming ('+4,000') amount both parse to signed cents", () => {
+    const rows = parseStatementCsv(realWorldNayaPayCsv, "file-real");
+    expect(rows[0].confidence).toBe("high");
+    expect(rows[2].confidence).toBe("high");
+    if (rows[0].confidence === "high") expect(rows[0].amountCents).toBe(-230000);
+    if (rows[2].confidence === "high") expect(rows[2].amountCents).toBe(400000);
   });
 
   test("[I3] a trailing-minus amount ('50.00-') is quarantined rather than read as positive", () => {

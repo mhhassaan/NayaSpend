@@ -72,17 +72,67 @@ function findHeader(headers: { name: string; value: string }[], name: string): s
   return headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? "";
 }
 
-function findPlainTextBody(payload: {
+type GmailMessagePart = {
+  mimeType?: string;
   body?: { data?: string };
-  parts?: { mimeType?: string; body?: { data?: string } }[];
-}): string {
-  if (payload.body?.data) {
-    return base64UrlToText(payload.body.data);
+  parts?: GmailMessagePart[];
+};
+
+function stripHtmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<(br|\/p|\/div|\/tr|\/li|\/h[1-6])\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// Real-world transactional emails (NayaPay's included) commonly nest the
+// actual content below extra multipart wrappers -- a multipart/mixed or
+// multipart/related layer (added the moment the template embeds an inline
+// image, like a branded banner) sits above the multipart/alternative that
+// holds the real text/plain and text/html parts. The previous version of
+// this function only ever looked one level into payload.parts, so any
+// such wrapper made it silently return "". This walks the whole MIME
+// tree, collecting every text/plain and text/html part at any depth, and
+// prefers a true text/plain body but falls back to HTML-stripped-to-text
+// when no plain part exists anywhere (also a real case: a purely
+// HTML-templated transactional email with no plain-text alternative).
+function collectBodyParts(part: GmailMessagePart, plain: string[], html: string[]): void {
+  if (part.body?.data) {
+    if (part.mimeType === "text/html") {
+      html.push(base64UrlToText(part.body.data));
+    } else if (part.mimeType === "text/plain" || part.mimeType === undefined) {
+      // No mimeType at all only happens for a simple, non-multipart
+      // message (the whole payload IS the body, nothing to
+      // disambiguate against) -- treat that the same as text/plain.
+      // Any other explicit mimeType (image/*, application/* …) is an
+      // attachment or inline image, never body text -- skip it rather
+      // than mixing its decoded bytes into the parsed body.
+      plain.push(base64UrlToText(part.body.data));
+    }
   }
-  const plainPart = payload.parts?.find((p) => p.mimeType === "text/plain");
-  if (plainPart?.body?.data) {
-    return base64UrlToText(plainPart.body.data);
+  for (const child of part.parts ?? []) {
+    collectBodyParts(child, plain, html);
   }
+}
+
+function findPlainTextBody(payload: GmailMessagePart): string {
+  const plain: string[] = [];
+  const html: string[] = [];
+  collectBodyParts(payload, plain, html);
+
+  if (plain.length > 0) return plain.join("\n");
+  if (html.length > 0) return stripHtmlToText(html.join("\n"));
   return "";
 }
 
@@ -119,8 +169,9 @@ export function createGmailClient(accessToken: string): GmailClient {
         internalDate: string;
         payload: {
           headers: { name: string; value: string }[];
+          mimeType?: string;
           body?: { data?: string };
-          parts?: { mimeType?: string; body?: { data?: string } }[];
+          parts?: GmailMessagePart[];
         };
       };
 

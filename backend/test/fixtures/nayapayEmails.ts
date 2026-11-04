@@ -27,6 +27,42 @@ export const promoEmailNoAmount: GmailMessage = {
   bodyText: "Check out our new instant transfer feature, now live in the app!",
 };
 
+// Reconstructed verbatim (labels, line breaks, wording) from a real NayaPay
+// "You spent" transaction email -- the fixtures above were an assumed
+// format that was never validated against a real message, and real
+// NayaPay emails don't contain the word "spent" anywhere in the body (only
+// in the subject); the body is a receipt-style template keyed off labels
+// like "Amount Paid" and "Merchant Details" / "Merchant UIC".
+export const realWorldSpendEmail: GmailMessage = {
+  id: "m-real",
+  threadId: "t-real",
+  internalDate: "1762277160000",
+  subject: "You spent Rs. 2,471 at KHAYABAN PHARMACYY Lahore PK",
+  from: "NayaPay <service@nayapay.com>",
+  bodyText: [
+    "Your transaction was successful",
+    "KHAYABAN PHARMACYY",
+    "Lahore PK",
+    "POS Transaction",
+    "04 Nov 2026, 07:26 PM",
+    "- Rs. 2,471",
+    "AMOUNT DETAILS",
+    "Amount Paid Rs. 2,471",
+    "Service Fee (Incl. Tax) Rs. 0",
+    "Total Amount Rs. 2,471",
+    "TRANSACTION DETAILS",
+    "Transaction ID 896508",
+    "ADDITIONAL INFORMATION",
+    "Card Visa \u25cf\u25cf\u25cf\u25cf8978",
+    "Type of Transaction PAN auto entry via ICC read from contactless Interface Terminal does not have PIN entry capability.",
+    "Acquiring Bank -",
+    "Merchant Category Drug Stores and Pharmacies",
+    "Merchant Details KHAYABAN PHARMACYY",
+    "Lahore PK",
+    "Merchant UIC 726995912573887",
+  ].join("\n"),
+};
+
 export const malformedLayoutEmail: GmailMessage = {
   id: "m-malformed",
   threadId: "t-malformed",

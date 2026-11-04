@@ -21,9 +21,12 @@ export function StatementUpload() {
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const form = new FormData();
-      form.set("file", file!);
-      const args = { form };
+      // Hono's RPC client builds the FormData itself from a plain object
+      // (args.form, via Object.entries) -- it does not accept an
+      // already-constructed FormData instance here. Passing one silently
+      // produces an empty body, since FormData's entries aren't
+      // enumerable own properties: Object.entries(aFormData) is [].
+      const args = { form: { file: file! } };
       const res = await apiClient.statements.$post(args);
       if (!res.ok) {
         const text = await res.text();
