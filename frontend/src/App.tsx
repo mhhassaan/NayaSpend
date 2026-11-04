@@ -3,6 +3,7 @@ import { AppShell } from "./components";
 import { NotFound } from "./pages/NotFound";
 import { ErrorPage } from "./pages/ErrorPage";
 import { Dashboard } from "./pages/Dashboard";
+import { Transactions } from "./pages/Transactions";
 
 // Plain data, no router instance created here -- `createBrowserRouter`
 // (main.tsx) and `createMemoryRouter` (tests) each attach their own
@@ -25,6 +26,7 @@ export const routes: RouteObject[] = [
     errorElement: <ErrorPage />,
     children: [
       { index: true, element: <Dashboard /> },
+      { path: "transactions", element: <Transactions /> },
       { path: "*", element: <NotFound /> },
     ],
   },
