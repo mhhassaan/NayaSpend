@@ -1,0 +1,79 @@
+import type { ReactNode } from "react";
+import { NavLink } from "react-router-dom";
+import {
+  BillsIcon,
+  BudgetsIcon,
+  CaptureHealthIcon,
+  DashboardIcon,
+  DedupIcon,
+  PlusIcon,
+  TransactionsIcon,
+} from "./icons";
+
+const NAV_ITEMS = [
+  { to: "/", label: "Dashboard", icon: DashboardIcon },
+  { to: "/transactions", label: "Transactions", icon: TransactionsIcon },
+  { to: "/dedup-review", label: "Dedup Review", icon: DedupIcon },
+  { to: "/budgets", label: "Budgets", icon: BudgetsIcon },
+  { to: "/bills", label: "Bills", icon: BillsIcon },
+  { to: "/capture-health", label: "Capture Health", icon: CaptureHealthIcon },
+] as const;
+
+function navLinkClass({ isActive }: { isActive: boolean }) {
+  return `flex items-center gap-3 rounded-md px-3 py-2 font-body text-[15px] font-medium transition-colors ${
+    isActive ? "bg-light-purple text-accent" : "text-text-secondary hover:bg-silver-frost"
+  }`;
+}
+
+// The one layout every page renders inside: a top bar (app name on the
+// left, a "Log transaction" quick action on the right) and a left
+// sidebar (desktop) / bottom tab bar (mobile) for nav between the primary
+// pages. Statement Upload and Log Missed Transaction are reached via
+// Dashboard's quick-action Tile grid, not this primary nav, per the
+// design doc's own page-layout pattern.
+export function AppShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-screen flex-col md:flex-row">
+      <aside className="hidden w-60 flex-col gap-1 border-r border-mid-grey bg-bg-surface p-4 md:flex">
+        <div className="mb-4 px-3 font-display text-[20px] font-bold text-blackberry">NayaSpend</div>
+        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+          <NavLink key={to} to={to} className={navLinkClass} end={to === "/"}>
+            <Icon />
+            {label}
+          </NavLink>
+        ))}
+      </aside>
+
+      <div className="flex flex-1 flex-col">
+        <header className="flex items-center justify-between border-b border-mid-grey bg-bg-surface px-4 py-3 md:hidden">
+          <span className="font-display text-[18px] font-bold text-blackberry">NayaSpend</span>
+        </header>
+        <header className="hidden items-center justify-end border-b border-mid-grey bg-bg-surface px-6 py-3 md:flex">
+          <NavLink
+            to="/log-transaction"
+            className="flex items-center gap-2 rounded-md bg-blackberry px-4 py-2 font-body text-[15px] font-semibold text-hyper-white"
+          >
+            <PlusIcon />
+            Log transaction
+          </NavLink>
+        </header>
+
+        <main className="flex-1 p-4 pb-20 md:pb-4">{children}</main>
+
+        <nav className="fixed inset-x-0 bottom-0 flex items-center justify-around border-t border-mid-grey bg-bg-surface py-2 md:hidden">
+          {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === "/"}
+              className={({ isActive }) => `flex flex-col items-center gap-1 px-2 text-[11px] ${isActive ? "text-accent" : "text-deep-grey"}`}
+            >
+              <Icon />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+      </div>
+    </div>
+  );
+}
