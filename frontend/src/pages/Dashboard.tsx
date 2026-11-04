@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import { apiClient } from "../api/client";
 import { Card, EmptyState, Pill, StatDisplay, Tile, showError } from "../components";
-import { BillsIcon, BudgetsIcon, TransactionsIcon } from "../components/icons";
+import { BillsIcon, BudgetsIcon, StatementUploadIcon, TransactionsIcon } from "../components/icons";
 
 type MonthlyTrends = {
   month: string;
@@ -111,8 +111,9 @@ export function Dashboard() {
       <div className="flex flex-col gap-6">
         <StatDisplay label={`Spend for ${monthData.month}`} value={formatCents(monthData.totalCents)} />
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-4 gap-3">
           <Tile icon={<TransactionsIcon />} label="Log transaction" onClick={() => (window.location.href = "/log-transaction")} />
+          <Tile icon={<StatementUploadIcon />} label="Upload statement" onClick={() => (window.location.href = "/statement-upload")} />
           <Tile icon={<BudgetsIcon />} label="Budgets" onClick={() => (window.location.href = "/budgets")} />
           <Tile icon={<BillsIcon />} label="Bills" onClick={() => (window.location.href = "/bills")} />
         </div>

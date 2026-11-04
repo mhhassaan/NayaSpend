@@ -70,6 +70,24 @@ describe("Dashboard", () => {
     });
   });
 
+  test("[break-ui] a single-month history with a huge total doesn't break the chart's bar-width math", async () => {
+    mockFetch([
+      {
+        test: urlContains("/api/trends?"),
+        respond: () =>
+          jsonResponse({ month: "2026-11", totalCents: 99999999, byCategory: [{ category: "Rent", totalCents: 99999999 }], hasData: true }),
+      },
+      {
+        test: urlContains("/api/trends/history"),
+        respond: () => jsonResponse({ months: [{ month: "2026-11", totalCents: 99999999, byCategory: [], hasData: true }] }),
+      },
+    ]);
+    renderWithProviders(<Dashboard />);
+    const chart = await screen.findByTestId("trends-history-chart");
+    const bar = chart.querySelector("div > div") as HTMLElement;
+    expect(bar.style.height).not.toMatch(/NaN|Infinity/);
+  });
+
   test("a failed fetch shows an error block with a retry button and toasts once", async () => {
     mockFetch([
       { test: urlContains("/api/trends?"), respond: () => { throw new Error("network error"); } },

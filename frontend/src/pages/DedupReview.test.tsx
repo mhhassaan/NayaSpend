@@ -71,6 +71,22 @@ describe("DedupReview", () => {
     await vi.waitFor(() => expect(showSuccess).toHaveBeenCalledOnce());
   });
 
+  test("[break-ui] a pair with a very long vendor name on one side still renders both sides in full", async () => {
+    const longVendor = "Christopher Alexander Montgomery III Enterprises Limited Partnership";
+    mockFetch([
+      {
+        test: urlContains("/api/transactions"),
+        respond: () =>
+          jsonResponse([
+            buildTransaction({ id: 1, dedupGroupId: "g1", dedupResolution: "pending", vendorRaw: longVendor }),
+            buildTransaction({ id: 2, dedupGroupId: "g1", dedupResolution: "pending", vendorRaw: longVendor }),
+          ]),
+      },
+    ]);
+    renderWithProviders(<DedupReview />);
+    expect(await screen.findAllByText(longVendor)).toHaveLength(2);
+  });
+
   test("batch-resolving several pairs via checkbox multi-select enables a bulk action", async () => {
     mockFetch([
       {

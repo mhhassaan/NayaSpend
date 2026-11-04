@@ -50,6 +50,14 @@ describe("Bills", () => {
     expect(spy.mock.calls.every(([, init]) => (init?.method ?? "GET") !== "POST")).toBe(true);
   });
 
+  test("[break-ui] a long vendor name and a huge expected amount render in full", async () => {
+    const longVendor = "Senior Product Design Engineer Platform Infrastructure Holdings Insurance Co.";
+    mockFetch([{ test: urlContains("/api/bills", "GET"), respond: () => jsonResponse([buildBill({ vendor: longVendor, expectedAmount: 99999999 })]) }]);
+    renderWithProviders(<Bills />);
+    expect(await screen.findByText(longVendor)).toBeInTheDocument();
+    expect(screen.getByText("Rs. 999,999.99")).toBeInTheDocument();
+  });
+
   test("editing a bill's next due date calls PATCH and toasts success", async () => {
     const spy = mockFetch([
       { test: urlContains("/api/bills", "GET"), respond: () => jsonResponse([buildBill({ id: 1, nextDueDate: "2026-11-15" })]) },

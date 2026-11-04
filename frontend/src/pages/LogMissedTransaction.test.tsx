@@ -39,6 +39,22 @@ describe("LogMissedTransaction", () => {
     expect(await screen.findByText(/amountCents must be a positive integer/i)).toBeInTheDocument();
   });
 
+  test("[break-ui] a non-Latin vendor name and a fractional amount round-trip without NaN", async () => {
+    const spy = mockFetch([
+      { test: urlContains("/api/missed-transactions", "POST"), respond: () => jsonResponse({ id: 1, category: "Uncategorized" }, 201) },
+    ]);
+    renderWithProviders(<LogMissedTransaction />);
+    await userEvent.type(screen.getByLabelText(/vendor/i), "نور الهدى عبد الرحمن");
+    await userEvent.type(screen.getByLabelText(/amount/i), "12345678.9");
+    await userEvent.type(screen.getByLabelText(/date/i), "2026-11-01");
+    await userEvent.click(screen.getByRole("button", { name: /log transaction/i }));
+    await screen.findByText(/logged as uncategorized/i);
+    const [, init] = spy.mock.calls[0];
+    const body = JSON.parse(init!.body as string);
+    expect(body.amountCents).toBe(1234567890);
+    expect(body.vendorRaw).toBe("نور الهدى عبد الرحمن");
+  });
+
   test("the form resets after a successful submission", async () => {
     mockFetch([
       { test: urlContains("/api/missed-transactions", "POST"), respond: () => jsonResponse({ id: 1, category: "Coffee" }, 201) },

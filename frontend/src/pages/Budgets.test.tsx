@@ -55,6 +55,18 @@ describe("Budgets", () => {
     expect(spy.mock.calls.every(([, init]) => (init?.method ?? "GET") !== "POST")).toBe(true);
   });
 
+  test("[break-ui] spending past the limit shows a percentage over 100% instead of clamping or breaking", async () => {
+    mockFetch([
+      { test: urlContains("/api/budgets", "GET"), respond: () => jsonResponse([{ id: 1, category: "Coffee", limitAmount: 10000, periodType: "monthly", lastAlertedThreshold: null, lastAlertedPeriodStart: null }]) },
+      {
+        test: urlContains("/api/trends", "GET"),
+        respond: () => jsonResponse({ month: new Date().toISOString().slice(0, 7), totalCents: 14200, byCategory: [{ category: "Coffee", totalCents: 14200 }], hasData: true }),
+      },
+    ]);
+    renderWithProviders(<Budgets />);
+    expect(await screen.findByText(/142%/)).toBeInTheDocument();
+  });
+
   test("deleting a budget asks for confirmation before calling delete", async () => {
     const spy = mockFetch([
       { test: urlContains("/api/budgets", "GET"), respond: () => jsonResponse([{ id: 1, category: "Coffee", limitAmount: 10000, periodType: "monthly", lastAlertedThreshold: null, lastAlertedPeriodStart: null }]) },

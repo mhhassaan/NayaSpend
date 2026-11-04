@@ -84,6 +84,14 @@ describe("Transactions", () => {
     expect(showSuccess).not.toHaveBeenCalledWith(expect.stringMatching(/possible duplicate/i));
   });
 
+  test("[break-ui] a long vendor name renders in full without breaking the row", async () => {
+    const longVendor = "Konstantin Oberhauser-Wettstein Gesellschaft für Zahlungsdienstleistungen mbH";
+    mockFetch([{ test: urlContains("/api/transactions"), respond: () => jsonResponse([buildTransaction({ vendorRaw: longVendor, amount: 99999999 })]) }]);
+    renderWithProviders(<Transactions />);
+    expect(await screen.findByText(longVendor)).toBeInTheDocument();
+    expect(screen.getByText("Rs. 999,999.99")).toBeInTheDocument();
+  });
+
   test("a failed mutation toasts an error", async () => {
     mockFetch([
       { test: urlContains("/api/transactions"), respond: () => jsonResponse([buildTransaction({ id: 4, category: "Uncategorized" })]) },

@@ -58,6 +58,21 @@ describe("CaptureHealth", () => {
     expect(await screen.findByText(/token exchange failed/i)).toBeInTheDocument();
   });
 
+  test("[break-ui] an unmapped errorType falls back to a generic message instead of rendering undefined", async () => {
+    mockFetch([
+      {
+        test: urlContains("/api/capture/health", "GET"),
+        respond: () =>
+          jsonResponse(
+            healthResponse({ runStatus: "api_call_failed", lastAttemptedRun: "2026-11-01T00:00:00Z", lastSuccessfulRun: null, errorType: "some_future_error_type" })
+          ),
+      },
+    ]);
+    renderWithProviders(<CaptureHealth />);
+    expect(await screen.findByText(/gmail sync is failing/i)).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
+  });
+
   test("a manual backfill trigger calls the backfill endpoint and toasts its result", async () => {
     mockFetch([
       {
