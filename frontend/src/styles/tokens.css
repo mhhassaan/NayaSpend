@@ -1,0 +1,62 @@
+:root {
+  /* Neutrals */
+  --color-dark-blackberry: #1e141e;
+  --color-blackberry: #381d2a;
+  --color-hyper-white: #fcf9fb;
+  --color-silver-frost: #f0eaed;
+  --color-deep-grey: #8c8085;
+  --color-mid-grey: #d9d2d5;
+  --color-lightest-grey: #ddcbd1;
+
+  /* Brand accents */
+  --color-electric-orange: #ff5018;
+  --color-hot-red: #c71e06;
+  --color-deep-violet: #9048c4;
+  --color-vivid-violet: #c4b8ff;
+  --color-light-purple: #ece8fd;
+  --color-bubblegum: #ffc6d4;
+
+  /* Semantic aliases -- components reference these, not raw colors,
+     so a future re-theme only touches this block */
+  --color-bg-page: var(--color-silver-frost);
+  --color-bg-surface: var(--color-hyper-white);
+  --color-bg-inverse: var(--color-blackberry);
+  --color-text-primary: var(--color-blackberry);
+  --color-text-secondary: var(--color-deep-grey);
+  --color-text-inverse: var(--color-hyper-white);
+  --color-border: var(--color-mid-grey);
+  --color-accent: var(--color-electric-orange);
+  --color-success: #1e8a4c; /* not from NayaPay's palette -- see frontend-design-system.md's note */
+  --color-warning: var(--color-electric-orange);
+  --color-danger: var(--color-hot-red);
+
+  --font-display: "Poppins", Verdana, sans-serif;
+  --font-body: "DM Sans", sans-serif;
+
+  --text-display-lg: 700 48px/1.1 var(--font-display);
+  --text-display-md: 700 32px/1.2 var(--font-display);
+  --text-balance: 700 36px/1.1 var(--font-body);
+  --text-body-lg: 400 18px/1.5 var(--font-body);
+  --text-body: 400 15px/1.5 var(--font-body);
+  --text-body-sm: 400 13px/1.4 var(--font-body);
+  --text-label: 600 13px/1.3 var(--font-body);
+  --text-button: 600 15px/1 var(--font-body);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(30, 20, 30, 0.06);
+  --shadow-md: 0 4px 12px rgba(30, 20, 30, 0.1);
+}

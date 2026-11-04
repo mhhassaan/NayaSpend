@@ -348,14 +348,48 @@ Scope: the last three capture-adjacent services (budget alerts, bill reminders, 
 
 ---
 
+## Phase 8: Frontend (React/Vite)
+
+**Plan:** `docs/superpowers/plans/2026-11-03-phase-8-frontend.md`
+**Design doc:** `docs/superpowers/specs/2026-11-03-phase-8-frontend-design.md`
+**Branch:** `worktree-phase-8-frontend`
+
+Scope: the entire React/Vite/TypeScript frontend (TanStack Query, react-router-dom, Tailwind, Motion, Sonner), covering all 8 pages (Dashboard, Transactions, Dedup Review, Log Missed Transaction, Statement Upload, Budgets, Bills, Capture Health), plus three small backend additions the frontend needed (`PATCH /transactions/:id`, `POST /transactions/:id/resolve-review`, `GET /trends/history`) and an OAuth-callback fix so the Gmail connect/reconnect flow lands back inside the SPA instead of returning a raw text response. Per explicit user instruction, built using the Emil Kowalski / `emil-design-eng` design philosophy and the `better-icons` skill for icons, with every page covering its loading/skeleton/error/empty states.
+
+**Plan-level rulings:**
+- Deferred to the pre-existing, user-authored `docs/designs/frontend-design-system.md` for every component/token decision, after brainstorming surfaced it — an initial shadcn/ui pick was withdrawn before any code was written.
+- Dashboard shows both a single-month nav view and a 6-month history chart (explicit user choice, requiring the new `GET /trends/history` route).
+- Quarantined transactions are user-editable before commit/reject, not approve-as-is (explicit user choice).
+- Executed inline (native), not subagent-driven (explicit user choice) — one fresh-context whole-branch review at the end instead of a review per task.
+
+**Two pervasive bugs found and fixed during implementation, not part of the plan's own scope:**
+- Every backend route file registered its routes as separate statements instead of chaining (`app.get(...); app.post(...);` instead of `app.get(...).post(...)`), which silently erases the type information Hono's RPC client (`hc<AppType>()`) needs — the exported `AppType` carried an empty route schema. Fixed by converting all 8 route files + `index.ts` to method chaining; verified behavior-unchanged via the full backend suite before and after.
+- Hono's `hc()` client is Proxy-based with no `set`/`defineProperty` trap, so `vi.spyOn(apiClient.x, "$get")` cannot intercept RPC calls (confirmed by reading `hono`'s own client source). Every frontend page test mocks global `fetch` directly instead — a deliberate, reusable pattern established once (Task 9) and reapplied for every later page.
+
+**Work completed (17 tasks, all committed):** 3 backend routes + the OAuth-redirect fix (Tasks 1-4), frontend scaffolding + the Hono chaining fix (Task 5), the design-system component library + ToastProvider + AppShell/routing (Tasks 6-8), all 8 pages (Tasks 9-16), and a final pass wiring a dead link (Statement Upload had no entry point in the UI) plus one worst-case-data test per page (Task 17).
+
+**Final review (fresh-context Agent, opus) — 1 Critical + 5 Important + 14 Minor findings, all Critical/Important fixed in one pass:**
+
+| # | Finding | Fix |
+|---|---|---|
+| C1 | Quarantined rows had no edit UI — clicking Commit wrote the adapters' zero-amount placeholder straight into the ledger, with no way to fix it afterward | Added editable vendor/amount/date/category fields to the resolve modal (PATCH before resolve-review), a provenance/quarantine-reason display, and a backend guard rejecting a commit while `amount <= 0` |
+| I1 | Account-number masking (a Review Focus item) was unimplemented, and its own test was vacuous — it only checked the upload page itself, never a page an account number would actually leak onto | Added `maskAccountNumbers`, applied to statement-sourced vendor text on Transactions and Dedup Review |
+| I2 | Budgets/Bills amount inputs took rupees but sent them straight through as cents — every typed amount was 100× too small | Added a shared `money.ts` (`formatCents`/`parseRupeesToCents`), fixed both create/edit forms |
+| I3 | Dedup Review's bulk "Resolve selected" always discarded an arbitrary side of every selected pair (whichever the API listed first) and fired one toast per pair | Limited the bulk action to `confirmed_distinct` (never discards either side), wrapped in try/catch, one summary toast |
+| I4 | Capture Health showed "Gmail connected" next to "Gmail not connected yet" immediately after a successful OAuth connect, since the first sync hasn't run yet | Added a "Connected — first sync pending" status for that window, keyed off the redirect param rather than the stale server snapshot |
+| I5 | The page-load-error-state Review Focus item was tested on only one page; Transactions and Dedup Review were also silently missing the one-time error toast | Added a load-error test to every query-backed page; added the missing toast to Transactions and Dedup Review |
+
+**Flagged, not fixed — scope decisions, not implementation oversights:** production `/api` routing and SPA deep-link fallback on a static host (explicitly Phase 9); the unauthenticated-API/no-login-UI gap (same open item below, not new); PDF statement upload (out of scope, Phase 4's unresolved question); `PATCH /:id` not re-running dedup/re-categorization on an edit to an already-committed row (the plan deliberately chose this).
+
+**Deferred minors** (ledgered, not fixed): Dashboard's quick-action tiles do a full page reload instead of client-side navigation; Dashboard flashes its full skeleton on every month change; the trend chart's empty-state copy says "No statement imported" but covers all sources; the Modal's scrim opacity class doesn't compile under Tailwind v3 (no visible tint); Modal has no Escape-to-close/focus trap/`aria-labelledby`; mutation buttons aren't disabled while in flight (a double-click can produce a success toast then an error toast); the mobile header's "Log transaction" quick action is unreachable except via the Dashboard tile; `ErrorPage` only catches crashes at the layout-route level, not per child route; `PATCH /transactions/:id` with an empty body `{}` 500s instead of 400; the OAuth callback doesn't special-case Google's `?error=access_denied`; a matched-duplicate commit has no persistent on-page signal beyond a 4-second toast; every RPC response/request body goes through an `as`-cast or the excess-property-check workaround (real fix is `zValidator` on the backend's mutation routes); the OAuth nonce cookie's path only works because the redirect URI points directly at the Worker, not through the `/api` proxy.
+
+**88/88 frontend tests passing, 240/240 backend tests passing** (up from 65/239 before the fix pass), clean `tsc --noEmit` + Vite build on both. Branch kept open pending the user's merge decision.
+
+---
+
 ## Still ahead
 
-- **Phase 8** (next step) — frontend. Per explicit user instruction, use the
-  Emil Kowalski / `emil-design-eng` and related animation/design skills
-  (installed in `.claude/skills/` and `.agents/skills/`) when building it.
-  The API surface is now fully mounted and stable, per the spec's own
-  note that Phase 8 starts "once the API surface from prior phases is
-  stable."
+Deployment and the long-open API-authentication decision (see below) are the natural next step — there is no further application functionality planned beyond Phase 8's frontend.
 
 ## Open items flagged to the user (not yet resolved)
 
@@ -380,6 +414,11 @@ Scope: the last three capture-adjacent services (budget alerts, bill reminders, 
   are all mounted with no auth layer. The decision itself is unchanged;
   flagging the growing blast radius so it's weighed before Phase 8 or any
   deploy, whichever comes first.
+  **Still open as of Phase 8:** the frontend has no login UI either — it
+  talks to the same unauthenticated API surface. The decision is still
+  unchanged (address before any real deployment), but with a frontend
+  now built, deployment is the natural next step, so this needs an
+  answer soon.
 - Spec correction needed: `string-similarity`/Jaro-Winkler reference
   (Phase 3) — the package is deprecated and implements a different
   algorithm than claimed.

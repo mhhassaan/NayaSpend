@@ -9,6 +9,7 @@ export type ConfigEnv = {
   RESEND_API_KEY: string;
   TOKEN_ENCRYPTION_KEY: string;
   NOTIFICATION_EMAIL: string;
+  FRONTEND_BASE_URL: string;
 };
 
 export type AppConfig = {
@@ -18,6 +19,7 @@ export type AppConfig = {
   resendApiKey: string;
   tokenEncryptionKey: string;
   notificationEmail: string;
+  frontendBaseUrl: string;
 };
 
 const REQUIRED_KEYS = [
@@ -27,6 +29,7 @@ const REQUIRED_KEYS = [
   "RESEND_API_KEY",
   "TOKEN_ENCRYPTION_KEY",
   "NOTIFICATION_EMAIL",
+  "FRONTEND_BASE_URL",
 ] as const;
 
 export function loadConfig(env: Partial<ConfigEnv>): AppConfig {
@@ -58,5 +61,6 @@ export function loadConfig(env: Partial<ConfigEnv>): AppConfig {
     resendApiKey: env.RESEND_API_KEY as string,
     tokenEncryptionKey: env.TOKEN_ENCRYPTION_KEY as string,
     notificationEmail: env.NOTIFICATION_EMAIL as string,
+    frontendBaseUrl: env.FRONTEND_BASE_URL as string,
   };
 }

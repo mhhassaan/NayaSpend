@@ -29,4 +29,27 @@ describe("trends routes", () => {
     const res = await trendsRoutes.request("/?month=bad-format", {}, env);
     expect(res.status).toBe(400);
   });
+
+  test("GET /history?months=3 returns 3 months", async () => {
+    const res = await trendsRoutes.request("/history?months=3", {}, env);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { months: unknown[] };
+    expect(body.months).toHaveLength(3);
+  });
+
+  test("GET /history with no months param defaults to 6", async () => {
+    const res = await trendsRoutes.request("/history", {}, env);
+    const body = (await res.json()) as { months: unknown[] };
+    expect(body.months).toHaveLength(6);
+  });
+
+  test("GET /history?months=99 returns 400 (exceeds the 24-month cap)", async () => {
+    const res = await trendsRoutes.request("/history?months=99", {}, env);
+    expect(res.status).toBe(400);
+  });
+
+  test("GET /history?months=0 returns 400", async () => {
+    const res = await trendsRoutes.request("/history?months=0", {}, env);
+    expect(res.status).toBe(400);
+  });
 });

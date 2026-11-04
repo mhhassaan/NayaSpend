@@ -26,7 +26,14 @@ async function importKey(base64Key: string): Promise<CryptoKey> {
       `Encryption key must decode to exactly ${KEY_LENGTH_BYTES} bytes for AES-256-GCM, got ${keyBytes.length}`
     );
   }
-  return crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, [
+  // `base64ToBytes`'s explicit `Uint8Array` return annotation widens its
+  // generic to `Uint8Array<ArrayBufferLike>` under TS's newer typed-array
+  // generics -- harmless for this Worker's own (DOM-free) build, but the
+  // frontend's type-only import of this file (via AppType, no npm
+  // workspace) also pulls in the DOM lib, whose stricter `BufferSource`
+  // only accepts `ArrayBuffer`. A plain type assertion, not a runtime
+  // change: `keyBytes` is a real `Uint8Array` either way.
+  return crypto.subtle.importKey("raw", keyBytes as BufferSource, "AES-GCM", false, [
     "encrypt",
     "decrypt",
   ]);

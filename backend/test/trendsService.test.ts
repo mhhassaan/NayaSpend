@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, test } from "vitest";
-import { getMonthlyTrends } from "../src/services/trendsService";
+import { getMonthlyTrends, getTrendsHistory } from "../src/services/trendsService";
 import { transactions } from "../src/db/schema";
 
 async function seed(db: ReturnType<typeof drizzle>, overrides: Partial<typeof transactions.$inferInsert> = {}) {
@@ -62,5 +62,32 @@ describe("getMonthlyTrends", () => {
 
     expect(result.hasData).toBe(false);
     expect(result.byCategory).toEqual([]);
+  });
+});
+
+describe("getTrendsHistory", () => {
+  test("returns monthsCount entries, oldest to newest, ending at the current month", async () => {
+    const db = drizzle(env.DB);
+    const result = await getTrendsHistory(db, 3);
+    expect(result.months).toHaveLength(3);
+    const now = new Date();
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    expect(result.months[2].month).toBe(currentMonth);
+  });
+
+  test("aggregates each month independently from one range query", async () => {
+    const db = drizzle(env.DB);
+    const now = new Date();
+    const thisMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    await db.insert(transactions).values({
+      amount: 1000, date: `${thisMonth}-05`, vendorRaw: "x", vendorNormalized: "x", category: "Coffee",
+      source: "manual_missed", provenance: "{}", reviewStatus: "committed",
+    });
+
+    const result = await getTrendsHistory(db, 2);
+
+    expect(result.months[1].totalCents).toBe(1000);
+    expect(result.months[1].hasData).toBe(true);
+    expect(result.months[0].hasData).toBe(false);
   });
 });

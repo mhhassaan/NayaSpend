@@ -20,3 +20,9 @@ TOKEN_ENCRYPTION_KEY=your-base64-encoded-32-byte-key
 # The single user's own email address -- where capture-health, budget,
 # and bill-reminder notifications are sent.
 NOTIFICATION_EMAIL=you@example.com
+
+# The frontend's own origin, used by /auth/gmail/callback to redirect back
+# into the app after a Gmail connect/reconnect attempt (success or
+# failure) instead of ending on a bare Worker response. The Vite dev
+# server's own default port is 5173.
+FRONTEND_BASE_URL=http://localhost:5173

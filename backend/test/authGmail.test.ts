@@ -16,6 +16,7 @@ const testEnv = {
   RESEND_API_KEY: "test-resend-key",
   TOKEN_ENCRYPTION_KEY: btoa("test-key-32-bytes-long-exactly!!"),
   NOTIFICATION_EMAIL: "user@example.com",
+  FRONTEND_BASE_URL: "https://frontend.example.com",
 };
 
 function cookieHeaderFrom(connectRes: Response): string {
@@ -76,16 +77,20 @@ describe("authGmail routes", () => {
     expect(setCookie).toContain("HttpOnly");
   });
 
-  test("[I2] GET /callback with a valid, fresh state but no nonce cookie is rejected", async () => {
+  // [Phase 8 Task 4] /callback now redirects into the SPA on every outcome
+  // (success or failure) instead of returning a bare Worker response, so
+  // CaptureHealth's reconnect action round-trips back into the app.
+  test("[I2] GET /callback with a valid, fresh state but no nonce cookie redirects to capture-health with an error", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const { state } = await freshFlow();
 
-    const res = await callback(`code=fake-code&state=${encodeURIComponent(state)}`);
+    const res = await callback(`code=fake-code&state=${encodeURIComponent(state)}`, undefined);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=invalid_state");
   });
 
-  test("[I2] GET /callback with a state from a different /connect call than the cookie is rejected", async () => {
+  test("[I2] GET /callback with a state from a different /connect call than the cookie redirects with an error", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const flowA = await freshFlow();
     const flowB = await freshFlow();
@@ -95,20 +100,22 @@ describe("authGmail routes", () => {
     // own nonce cookie (flowB's).
     const res = await callback(`code=fake-code&state=${encodeURIComponent(flowA.state)}`, flowB.cookie);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=invalid_state");
   });
 
-  test("GET /callback with a tampered state parameter is rejected", async () => {
+  test("GET /callback with a tampered state parameter redirects with an error", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const { state, cookie } = await freshFlow();
     const tampered = state.slice(0, -1) + (state.endsWith("A") ? "B" : "A");
 
     const res = await callback(`code=fake-code&state=${tampered}`, cookie);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=invalid_state");
   });
 
-  test("GET /callback with a valid, fresh state and matching cookie succeeds", async () => {
+  test("GET /callback with a valid state and cookie, successful exchange, redirects to capture-health?connected=1", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ access_token: "a", refresh_token: "r", expires_in: 3600 }), { status: 200 }))
@@ -117,10 +124,11 @@ describe("authGmail routes", () => {
 
     const res = await callback(`code=fake-code&state=${encodeURIComponent(state)}`, cookie);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?connected=1");
   });
 
-  test("GET /callback with an expired (>10 minutes old) state is rejected", async () => {
+  test("GET /callback with an expired (>10 minutes old) state redirects with an error", async () => {
     vi.stubGlobal("fetch", vi.fn());
     const { signState } = await import("../src/routes/authGmail");
     const nonce = "test-nonce";
@@ -128,7 +136,8 @@ describe("authGmail routes", () => {
 
     const res = await callback(`code=fake-code&state=${encodeURIComponent(staleState)}`, `gmail_oauth_nonce=${nonce}`);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=invalid_state");
   });
 
   test("GET /callback exchanges the code and stores an encrypted token", async () => {
@@ -149,7 +158,8 @@ describe("authGmail routes", () => {
 
     const { state, cookie } = await freshFlow();
     const res = await callback(`code=fake-auth-code&state=${encodeURIComponent(state)}`, cookie);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?connected=1");
 
     const db = drizzle(env.DB);
     const [row] = await db.select().from(gmailCredentials);
@@ -201,18 +211,19 @@ describe("authGmail routes", () => {
     );
   });
 
-  test("a callback with no code param fails clearly instead of calling the token endpoint", async () => {
+  test("a callback with no code param redirects with a missing_code error, without calling the token endpoint", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const { state, cookie } = await freshFlow();
 
     const res = await callback(`state=${encodeURIComponent(state)}`, cookie);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=missing_code");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  test("a failed token exchange returns a clear error and does not overwrite stored credentials", async () => {
+  test("a failed token exchange redirects to capture-health with an error, and does not overwrite stored credentials", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -235,12 +246,13 @@ describe("authGmail routes", () => {
     const flow2 = await freshFlow();
     const res = await callback(`code=bad-code&state=${encodeURIComponent(flow2.state)}`, flow2.cookie);
 
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=exchange_failed");
     const [after] = await db.select().from(gmailCredentials);
     expect(after.encryptedAccessToken).toBe(before.encryptedAccessToken);
   });
 
-  test("a token response missing access_token is rejected, not stored as an empty credential", async () => {
+  test("a token response missing access_token redirects with an error, not stored as an empty credential", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -251,13 +263,14 @@ describe("authGmail routes", () => {
 
     const res = await callback(`code=weird-code&state=${encodeURIComponent(state)}`, cookie);
 
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=missing_access_token");
     const db = drizzle(env.DB);
     const rows = await db.select().from(gmailCredentials);
     expect(rows).toHaveLength(0);
   });
 
-  test("a token response missing expires_in is rejected, not stored with an invalid expiry", async () => {
+  test("a token response missing expires_in redirects with an error, not stored with an invalid expiry", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -269,7 +282,8 @@ describe("authGmail routes", () => {
 
     const res = await callback(`code=weird-code&state=${encodeURIComponent(state)}`, cookie);
 
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=invalid_expiry");
   });
 
   test("a token response with no refresh_token (e.g. a reconnect Google doesn't re-issue one for) keeps the existing refresh token", async () => {
@@ -296,10 +310,24 @@ describe("authGmail routes", () => {
     const flow2 = await freshFlow();
     const res = await callback(`code=second&state=${encodeURIComponent(flow2.state)}`, flow2.cookie);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?connected=1");
     const db = drizzle(env.DB);
     const [row] = await db.select().from(gmailCredentials);
     expect(await decryptToken(row.encryptedAccessToken, testEnv.TOKEN_ENCRYPTION_KEY)).toBe("renewed-access");
     expect(await decryptToken(row.encryptedRefreshToken, testEnv.TOKEN_ENCRYPTION_KEY)).toBe("initial-refresh");
+  });
+
+  test("a callback with no refresh_token on a first-time connection (no existing credential) redirects with an error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ access_token: "a", expires_in: 3600 }), { status: 200 }))
+    );
+    const { state, cookie } = await freshFlow();
+
+    const res = await callback(`code=fake-code&state=${encodeURIComponent(state)}`, cookie);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=missing_refresh_token");
   });
 });

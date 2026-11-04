@@ -6,8 +6,6 @@ type Env = {
   DB: D1Database;
 };
 
-export const statementsRoutes = new Hono<{ Bindings: Env }>();
-
 const ACCEPTED_CONTENT_TYPES = new Set(["text/csv", "text/plain", "application/vnd.ms-excel"]);
 
 function looksLikeCsv(file: File): boolean {
@@ -22,7 +20,9 @@ async function sha256Hex(text: string): Promise<string> {
     .join("");
 }
 
-statementsRoutes.post("/", async (c) => {
+// [Phase 8 Task 5] Chained so `typeof statementsRoutes` carries its
+// route's schema -- see the identical fix/explanation in index.ts.
+export const statementsRoutes = new Hono<{ Bindings: Env }>().post("/", async (c) => {
   const body = await c.req.parseBody();
   const file = body.file;
 

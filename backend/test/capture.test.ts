@@ -9,7 +9,7 @@ const testEnv = {
   ...env,
   GMAIL_CLIENT_ID: "a", GMAIL_CLIENT_SECRET: "b", GMAIL_REDIRECT_URI: "https://example.com/cb",
   RESEND_API_KEY: "test-resend-key", TOKEN_ENCRYPTION_KEY: btoa("test-key-32-bytes-long-exactly!!"),
-  NOTIFICATION_EMAIL: "user@example.com",
+  NOTIFICATION_EMAIL: "user@example.com", FRONTEND_BASE_URL: "https://frontend.example.com",
 };
 
 describe("capture routes", () => {

@@ -5,7 +5,7 @@ import { loadConfig } from "../src/config";
 const VALID_KEY = btoa("test-key-32-bytes-long-exactly!!");
 
 describe("loadConfig", () => {
-  test("reads all six required secrets", () => {
+  test("reads all seven required secrets", () => {
     const env = {
       GMAIL_CLIENT_ID: "a",
       GMAIL_CLIENT_SECRET: "b",
@@ -13,6 +13,7 @@ describe("loadConfig", () => {
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: VALID_KEY,
       NOTIFICATION_EMAIL: "user@example.com",
+      FRONTEND_BASE_URL: "https://frontend.example.com",
     };
     const config = loadConfig(env);
     expect(config).toEqual({
@@ -22,7 +23,20 @@ describe("loadConfig", () => {
       resendApiKey: "c",
       tokenEncryptionKey: VALID_KEY,
       notificationEmail: "user@example.com",
+      frontendBaseUrl: "https://frontend.example.com",
     });
+  });
+
+  test("throws a clear error naming FRONTEND_BASE_URL when it is missing", () => {
+    const env = {
+      GMAIL_CLIENT_ID: "a",
+      GMAIL_CLIENT_SECRET: "b",
+      GMAIL_REDIRECT_URI: "https://example.com/auth/gmail/callback",
+      RESEND_API_KEY: "c",
+      TOKEN_ENCRYPTION_KEY: VALID_KEY,
+      NOTIFICATION_EMAIL: "user@example.com",
+    };
+    expect(() => loadConfig(env)).toThrow(/FRONTEND_BASE_URL/);
   });
 
   test("throws a clear error naming the specific missing secret", () => {
@@ -50,6 +64,7 @@ describe("loadConfig", () => {
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: "ZGQ=", // decodes to 2 bytes, not 32
       NOTIFICATION_EMAIL: "user@example.com",
+      FRONTEND_BASE_URL: "https://frontend.example.com",
     };
     expect(() => loadConfig(env)).toThrow(/TOKEN_ENCRYPTION_KEY/);
   });
@@ -62,6 +77,7 @@ describe("loadConfig", () => {
       RESEND_API_KEY: "c",
       TOKEN_ENCRYPTION_KEY: "your-base64-encoded-32-byte-key", // placeholder-shaped, not valid base64
       NOTIFICATION_EMAIL: "user@example.com",
+      FRONTEND_BASE_URL: "https://frontend.example.com",
     };
     expect(() => loadConfig(env)).toThrow(/TOKEN_ENCRYPTION_KEY/);
   });
