@@ -9,6 +9,7 @@ import { LogMissedTransaction } from "./pages/LogMissedTransaction";
 import { StatementUpload } from "./pages/StatementUpload";
 import { Budgets } from "./pages/Budgets";
 import { Bills } from "./pages/Bills";
+import { CaptureHealth } from "./pages/CaptureHealth";
 
 // Plain data, no router instance created here -- `createBrowserRouter`
 // (main.tsx) and `createMemoryRouter` (tests) each attach their own
@@ -37,6 +38,7 @@ export const routes: RouteObject[] = [
       { path: "statement-upload", element: <StatementUpload /> },
       { path: "budgets", element: <Budgets /> },
       { path: "bills", element: <Bills /> },
+      { path: "capture-health", element: <CaptureHealth /> },
       { path: "*", element: <NotFound /> },
     ],
   },
