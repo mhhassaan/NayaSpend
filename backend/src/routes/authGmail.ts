@@ -13,6 +13,7 @@ type Env = {
   GMAIL_REDIRECT_URI: string;
   RESEND_API_KEY: string;
   TOKEN_ENCRYPTION_KEY: string;
+  FRONTEND_BASE_URL: string;
 };
 
 export const authGmailRoutes = new Hono<{ Bindings: Env }>();
@@ -128,18 +129,28 @@ async function redirectToConsent(c: Context<{ Bindings: Env }>) {
 authGmailRoutes.get("/connect", (c) => redirectToConsent(c));
 authGmailRoutes.get("/reconnect", (c) => redirectToConsent(c));
 
+// Every outcome of /callback -- success or any failure -- redirects into
+// the SPA's CaptureHealth page instead of returning a bare Worker
+// response, so the reconnect round trip (CaptureHealth -> Google -> back)
+// always lands the user back inside the app.
+function redirectToFrontend(c: Context<{ Bindings: Env }>, frontendBaseUrl: string, path: string) {
+  c.header("Location", `${frontendBaseUrl}${path}`);
+  return c.body(null, 302);
+}
+
 authGmailRoutes.get("/callback", async (c) => {
   const config = loadConfig(c.env);
+  const toFrontend = (path: string) => redirectToFrontend(c, config.frontendBaseUrl, path);
 
   const state = c.req.query("state");
   const cookieNonce = getCookie(c, NONCE_COOKIE_NAME);
   if (!state || !(await verifyState(state, cookieNonce, config.tokenEncryptionKey))) {
-    return c.text("Missing or invalid state parameter", 400);
+    return toFrontend("/capture-health?error=invalid_state");
   }
 
   const code = c.req.query("code");
   if (!code) {
-    return c.text("Missing required query parameter: code", 400);
+    return toFrontend("/capture-health?error=missing_code");
   }
 
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
@@ -155,7 +166,7 @@ authGmailRoutes.get("/callback", async (c) => {
   });
 
   if (!tokenResponse.ok) {
-    return c.text("Gmail token exchange failed", 502);
+    return toFrontend("/capture-health?error=exchange_failed");
   }
 
   const tokenJson = (await tokenResponse.json()) as {
@@ -169,10 +180,10 @@ authGmailRoutes.get("/callback", async (c) => {
   // a malformed response can never overwrite a working credential with a
   // broken one (e.g. an empty access token, or a NaN expiry).
   if (!tokenJson.access_token) {
-    return c.text("Gmail token exchange response is missing access_token", 502);
+    return toFrontend("/capture-health?error=missing_access_token");
   }
   if (typeof tokenJson.expires_in !== "number" || !Number.isFinite(tokenJson.expires_in)) {
-    return c.text("Gmail token exchange response is missing a valid expires_in", 502);
+    return toFrontend("/capture-health?error=invalid_expiry");
   }
 
   const db = drizzle(c.env.DB);
@@ -187,7 +198,7 @@ authGmailRoutes.get("/callback", async (c) => {
   } else if (existing) {
     refreshTokenToStore = await decryptToken(existing.encryptedRefreshToken, config.tokenEncryptionKey);
   } else {
-    return c.text("Gmail token exchange response is missing refresh_token for a first-time connection", 502);
+    return toFrontend("/capture-health?error=missing_refresh_token");
   }
 
   const encryptedAccessToken = await encryptToken(tokenJson.access_token, config.tokenEncryptionKey);
@@ -203,5 +214,5 @@ authGmailRoutes.get("/callback", async (c) => {
     await db.insert(gmailCredentials).values({ encryptedAccessToken, encryptedRefreshToken, expiresAt });
   }
 
-  return c.text("Gmail account connected.", 200);
+  return toFrontend("/capture-health?connected=1");
 });

@@ -13,6 +13,7 @@ const testEnv = {
   RESEND_API_KEY: "test-resend-key",
   TOKEN_ENCRYPTION_KEY: btoa("test-key-32-bytes-long-exactly!!"),
   NOTIFICATION_EMAIL: "user@example.com",
+  FRONTEND_BASE_URL: "https://frontend.example.com",
 };
 
 describe("scheduled handler", () => {
