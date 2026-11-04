@@ -37,6 +37,12 @@
       "skillPath": "skills/ask-sonner/SKILL.md",
       "computedHash": "0168a6a129ba0a3561ccbda3a3d8d0dc0af1d556f373e315e9479e3364420dd3"
     },
+    "better-icons": {
+      "source": "better-auth/better-icons",
+      "sourceType": "github",
+      "skillPath": "skills/SKILL.md",
+      "computedHash": "b16a2f5830f3db40695fdd58d415a631e9fb6170a0cc5d3b56469d17e53596bc"
+    },
     "break-ui": {
       "source": "emilkowalski/skills",
       "sourceType": "github",
