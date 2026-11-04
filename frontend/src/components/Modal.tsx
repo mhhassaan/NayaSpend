@@ -18,6 +18,8 @@ export function Modal({ open, onClose, children }: ModalProps) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-dark-blackberry)]/20"
     >
       <div
+        role="dialog"
+        aria-modal="true"
         onClick={(e) => e.stopPropagation()}
         className="rounded-xl bg-bg-surface p-6 shadow-[var(--shadow-md)]"
       >
