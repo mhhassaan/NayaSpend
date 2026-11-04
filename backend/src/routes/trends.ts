@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { getMonthlyTrends } from "../services/trendsService";
+import { getMonthlyTrends, getTrendsHistory } from "../services/trendsService";
 
 type Env = {
   DB: D1Database;
@@ -9,6 +9,8 @@ type Env = {
 export const trendsRoutes = new Hono<{ Bindings: Env }>();
 
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
+const DEFAULT_HISTORY_MONTHS = 6;
+const MAX_HISTORY_MONTHS = 24;
 
 trendsRoutes.get("/", async (c) => {
   const monthParam = c.req.query("month");
@@ -20,5 +22,18 @@ trendsRoutes.get("/", async (c) => {
 
   const db = drizzle(c.env.DB);
   const result = await getMonthlyTrends(db, month);
+  return c.json(result);
+});
+
+trendsRoutes.get("/history", async (c) => {
+  const monthsParam = c.req.query("months");
+  const months = monthsParam === undefined ? DEFAULT_HISTORY_MONTHS : Number(monthsParam);
+
+  if (!Number.isInteger(months) || months < 1 || months > MAX_HISTORY_MONTHS) {
+    return c.text(`months must be an integer between 1 and ${MAX_HISTORY_MONTHS}`, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const result = await getTrendsHistory(db, months);
   return c.json(result);
 });
