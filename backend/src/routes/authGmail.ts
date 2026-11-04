@@ -16,8 +16,6 @@ type Env = {
   FRONTEND_BASE_URL: string;
 };
 
-export const authGmailRoutes = new Hono<{ Bindings: Env }>();
-
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 const NONCE_COOKIE_NAME = "gmail_oauth_nonce";
 
@@ -126,9 +124,6 @@ async function redirectToConsent(c: Context<{ Bindings: Env }>) {
   return c.body(null, 302);
 }
 
-authGmailRoutes.get("/connect", (c) => redirectToConsent(c));
-authGmailRoutes.get("/reconnect", (c) => redirectToConsent(c));
-
 // Every outcome of /callback -- success or any failure -- redirects into
 // the SPA's CaptureHealth page instead of returning a bare Worker
 // response, so the reconnect round trip (CaptureHealth -> Google -> back)
@@ -138,7 +133,12 @@ function redirectToFrontend(c: Context<{ Bindings: Env }>, frontendBaseUrl: stri
   return c.body(null, 302);
 }
 
-authGmailRoutes.get("/callback", async (c) => {
+// [Phase 8 Task 5] Chained so `typeof authGmailRoutes` carries every
+// route's schema -- see the identical fix/explanation in index.ts.
+export const authGmailRoutes = new Hono<{ Bindings: Env }>()
+  .get("/connect", (c) => redirectToConsent(c))
+  .get("/reconnect", (c) => redirectToConsent(c))
+  .get("/callback", async (c) => {
   const config = loadConfig(c.env);
   const toFrontend = (path: string) => redirectToFrontend(c, config.frontendBaseUrl, path);
 
@@ -215,4 +215,4 @@ authGmailRoutes.get("/callback", async (c) => {
   }
 
   return toFrontend("/capture-health?connected=1");
-});
+  });

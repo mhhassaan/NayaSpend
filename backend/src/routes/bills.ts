@@ -7,8 +7,6 @@ type Env = {
   DB: D1Database;
 };
 
-export const billsRoutes = new Hono<{ Bindings: Env }>();
-
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function isPositiveInteger(value: unknown): value is number {
@@ -22,13 +20,15 @@ function isValidIsoDate(date: unknown): date is string {
   return new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date;
 }
 
-billsRoutes.get("/", async (c) => {
-  const db = drizzle(c.env.DB);
-  const rows = await db.select().from(bills);
-  return c.json(rows);
-});
-
-billsRoutes.post("/", async (c) => {
+// [Phase 8 Task 5] Chained so `typeof billsRoutes` carries every route's
+// schema -- see the identical fix/explanation in index.ts.
+export const billsRoutes = new Hono<{ Bindings: Env }>()
+  .get("/", async (c) => {
+    const db = drizzle(c.env.DB);
+    const rows = await db.select().from(bills);
+    return c.json(rows);
+  })
+  .post("/", async (c) => {
   let body: { vendor?: unknown; expectedAmount?: unknown; expectedInterval?: unknown; nextDueDate?: unknown };
   try {
     body = await c.req.json();
@@ -58,9 +58,8 @@ billsRoutes.post("/", async (c) => {
     .returning();
 
   return c.json(row, 201);
-});
-
-billsRoutes.patch("/:id", async (c) => {
+  })
+  .patch("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
   const [row] = await db.select().from(bills).where(eq(bills.id, id));
@@ -106,9 +105,8 @@ billsRoutes.patch("/:id", async (c) => {
   await db.update(bills).set(updates).where(eq(bills.id, id));
   const [updated] = await db.select().from(bills).where(eq(bills.id, id));
   return c.json(updated);
-});
-
-billsRoutes.delete("/:id", async (c) => {
+  })
+  .delete("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
   const [row] = await db.select().from(bills).where(eq(bills.id, id));
@@ -117,5 +115,5 @@ billsRoutes.delete("/:id", async (c) => {
   }
 
   await db.delete(bills).where(eq(bills.id, id));
-  return c.body(null, 204);
-});
+    return c.body(null, 204);
+  });

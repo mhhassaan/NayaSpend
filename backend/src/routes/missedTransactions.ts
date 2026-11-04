@@ -6,9 +6,9 @@ type Env = {
   DB: D1Database;
 };
 
-export const missedTransactionsRoutes = new Hono<{ Bindings: Env }>();
-
-missedTransactionsRoutes.post("/", async (c) => {
+// [Phase 8 Task 5] Chained so `typeof missedTransactionsRoutes` carries
+// its route's schema -- see the identical fix/explanation in index.ts.
+export const missedTransactionsRoutes = new Hono<{ Bindings: Env }>().post("/", async (c) => {
   let body: { vendorRaw?: unknown; amountCents?: unknown; date?: unknown };
   try {
     body = await c.req.json();

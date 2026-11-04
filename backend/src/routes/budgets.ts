@@ -7,19 +7,19 @@ type Env = {
   DB: D1Database;
 };
 
-export const budgetsRoutes = new Hono<{ Bindings: Env }>();
-
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-budgetsRoutes.get("/", async (c) => {
-  const db = drizzle(c.env.DB);
-  const rows = await db.select().from(budgets);
-  return c.json(rows);
-});
-
-budgetsRoutes.post("/", async (c) => {
+// [Phase 8 Task 5] Chained so `typeof budgetsRoutes` carries every route's
+// schema -- see the identical fix/explanation in index.ts.
+export const budgetsRoutes = new Hono<{ Bindings: Env }>()
+  .get("/", async (c) => {
+    const db = drizzle(c.env.DB);
+    const rows = await db.select().from(budgets);
+    return c.json(rows);
+  })
+  .post("/", async (c) => {
   let body: { category?: unknown; limitAmount?: unknown; periodType?: unknown };
   try {
     body = await c.req.json();
@@ -45,9 +45,8 @@ budgetsRoutes.post("/", async (c) => {
     .returning();
 
   return c.json(row, 201);
-});
-
-budgetsRoutes.patch("/:id", async (c) => {
+  })
+  .patch("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
   const [row] = await db.select().from(budgets).where(eq(budgets.id, id));
@@ -86,9 +85,8 @@ budgetsRoutes.patch("/:id", async (c) => {
   await db.update(budgets).set(updates).where(eq(budgets.id, id));
   const [updated] = await db.select().from(budgets).where(eq(budgets.id, id));
   return c.json(updated);
-});
-
-budgetsRoutes.delete("/:id", async (c) => {
+  })
+  .delete("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
   const [row] = await db.select().from(budgets).where(eq(budgets.id, id));
@@ -97,5 +95,5 @@ budgetsRoutes.delete("/:id", async (c) => {
   }
 
   await db.delete(budgets).where(eq(budgets.id, id));
-  return c.body(null, 204);
-});
+    return c.body(null, 204);
+  });

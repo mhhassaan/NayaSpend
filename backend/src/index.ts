@@ -26,15 +26,22 @@ type Env = ConfigEnv & {
 const CAPTURE_CRON = "0 * * * *";
 const WATCHDOG_CRON = "30 * * * *";
 
-const app = new Hono<{ Bindings: Env }>();
-app.route("/transactions", transactionsRoutes);
-app.route("/missed-transactions", missedTransactionsRoutes);
-app.route("/budgets", budgetsRoutes);
-app.route("/bills", billsRoutes);
-app.route("/trends", trendsRoutes);
-app.route("/statements", statementsRoutes);
-app.route("/capture", captureRoutes);
-app.route("/auth/gmail", authGmailRoutes);
+// Chained (not separate statements) so `typeof app` carries every route's
+// merged type -- each `.route()` call returns a new, more-specifically
+// typed instance rather than mutating `app` in place. Separate statements
+// would leave AppType reflecting only the instance before any route was
+// attached, and hc<AppType>() would silently infer no routes at all.
+const app = new Hono<{ Bindings: Env }>()
+  .route("/transactions", transactionsRoutes)
+  .route("/missed-transactions", missedTransactionsRoutes)
+  .route("/budgets", budgetsRoutes)
+  .route("/bills", billsRoutes)
+  .route("/trends", trendsRoutes)
+  .route("/statements", statementsRoutes)
+  .route("/capture", captureRoutes)
+  .route("/auth/gmail", authGmailRoutes);
+
+export type AppType = typeof app;
 
 async function recordDispatchFailure(env: Env, err: unknown) {
   const db = drizzle(env.DB);
