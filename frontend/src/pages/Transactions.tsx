@@ -132,7 +132,7 @@ function ResolveReviewModal({ transaction, open, onClose }: { transaction: Trans
   function handleCommit() {
     const amountCents = parseRupeesToCents(amount);
     if (!Number.isFinite(amountCents) || amountCents <= 0) {
-      setClientError("amount must be a positive integer before this row can be committed");
+      setClientError("Enter an amount greater than zero before this can be committed.");
       return;
     }
     setClientError(null);
@@ -157,7 +157,7 @@ function ResolveReviewModal({ transaction, open, onClose }: { transaction: Trans
         <label className="flex flex-col gap-1">
           <span className="font-body text-[13px] font-semibold text-text-secondary">Vendor</span>
           <input
-            aria-label="Vendor"
+            aria-label="Vendor" placeholder="e.g. Corner Store"
             className="rounded-sm border border-mid-grey px-3 py-2"
             value={vendorRaw}
             onChange={(e) => setVendorRaw(e.target.value)}
@@ -166,7 +166,7 @@ function ResolveReviewModal({ transaction, open, onClose }: { transaction: Trans
         <label className="flex flex-col gap-1">
           <span className="font-body text-[13px] font-semibold text-text-secondary">Amount (Rs.)</span>
           <input
-            aria-label="Amount"
+            aria-label="Amount" placeholder="e.g. 1250.00"
             className="rounded-sm border border-mid-grey px-3 py-2"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -174,7 +174,7 @@ function ResolveReviewModal({ transaction, open, onClose }: { transaction: Trans
         </label>
         <label className="flex flex-col gap-1">
           <span className="font-body text-[13px] font-semibold text-text-secondary">Date</span>
-          <input aria-label="Date" className="rounded-sm border border-mid-grey px-3 py-2" value={date} onChange={(e) => setDate(e.target.value)} />
+          <input aria-label="Date" placeholder="YYYY-MM-DD" className="rounded-sm border border-mid-grey px-3 py-2" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
         <label className="flex flex-col gap-1">
           <span className="font-body text-[13px] font-semibold text-text-secondary">Category</span>

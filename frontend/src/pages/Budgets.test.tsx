@@ -42,7 +42,7 @@ describe("Budgets", () => {
     expect(await screen.findByText(/no budgets yet/i)).toBeInTheDocument();
   });
 
-  test("creating a budget with a non-positive limit is rejected client-side with the backend's own message style", async () => {
+  test("creating a budget with a non-positive limit is rejected client-side with a plain-language message", async () => {
     const spy = mockFetch([
       { test: urlContains("/api/budgets", "GET"), respond: () => jsonResponse([]) },
       { test: urlContains("/api/trends", "GET"), respond: () => jsonResponse(trendsResponse()) },
@@ -52,7 +52,7 @@ describe("Budgets", () => {
     await userEvent.type(screen.getByLabelText(/category/i), "Rent");
     await userEvent.type(screen.getByLabelText(/limit/i), "0");
     await userEvent.click(screen.getByRole("button", { name: /save/i }));
-    expect(await screen.findByText(/positive integer/i)).toBeInTheDocument();
+    expect(await screen.findByText(/enter a limit greater than zero/i)).toBeInTheDocument();
     expect(spy.mock.calls.every(([, init]) => (init?.method ?? "GET") !== "POST")).toBe(true);
   });
 

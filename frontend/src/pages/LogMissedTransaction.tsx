@@ -55,7 +55,7 @@ export function LogMissedTransaction() {
               <label className="flex flex-col gap-1">
                 <span className="font-body text-[13px] font-semibold text-text-secondary">Vendor</span>
                 <input
-                  aria-label="Vendor"
+                  aria-label="Vendor" placeholder="e.g. Corner Store"
                   className="rounded-sm border border-mid-grey px-3 py-2"
                   value={vendor}
                   onChange={(e) => setVendor(e.target.value)}
@@ -65,7 +65,7 @@ export function LogMissedTransaction() {
               <label className="flex flex-col gap-1">
                 <span className="font-body text-[13px] font-semibold text-text-secondary">Amount</span>
                 <input
-                  aria-label="Amount"
+                  aria-label="Amount" placeholder="e.g. 1250.00"
                   type="text"
                   inputMode="decimal"
                   className="rounded-sm border border-mid-grey px-3 py-2"

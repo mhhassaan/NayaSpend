@@ -107,7 +107,7 @@ describe("Transactions", () => {
     renderWithProviders(<Transactions />);
     await userEvent.click(await screen.findByRole("button", { name: /resolve/i }));
     await userEvent.click(screen.getByRole("button", { name: /^commit$/i }));
-    expect(await screen.findByText(/positive integer/i)).toBeInTheDocument();
+    expect(await screen.findByText(/enter an amount greater than zero/i)).toBeInTheDocument();
     expect(spy.mock.calls.every(([, init]) => (init?.method ?? "GET") === "GET")).toBe(true);
   });
 
