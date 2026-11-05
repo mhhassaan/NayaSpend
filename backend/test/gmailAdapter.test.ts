@@ -1,7 +1,8 @@
+import { seedUserAndSession } from "./helpers/authedRequest";
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { captureRuns, transactions } from "../src/db/schema";
 import { runBackfill, runOngoingPoll } from "../src/adapters/gmailAdapter";
 import { parseNayaPayEmail } from "../src/adapters/parseNayaPayEmail";
@@ -13,6 +14,11 @@ import {
   realWorldSpendEmail,
 } from "./fixtures/nayapayEmails";
 import type { GmailClient, GmailMessage } from "../src/adapters/gmailClient";
+
+let userId: number;
+beforeEach(async () => {
+  ({ userId } = await seedUserAndSession(drizzle(env.DB)));
+});
 
 describe("parseNayaPayEmail", () => {
   test("parses a clean 'Rs. 1,250.00' transaction email to 125000 cents", () => {
@@ -180,7 +186,7 @@ describe("runBackfill", () => {
       { "m-clean": cleanTransactionEmail }
     );
 
-    await runBackfill(db, client);
+    await runBackfill(db, client, userId);
 
     const rows = await db.select().from(transactions);
     expect(rows).toHaveLength(1);
@@ -195,7 +201,7 @@ describe("runBackfill", () => {
       { "m-clean": cleanTransactionEmail }
     );
 
-    const result = await runBackfill(db, client);
+    const result = await runBackfill(db, client, userId);
 
     expect(result.processed).toBe(1);
     expect(result.nextPageToken).toBeNull();
@@ -213,7 +219,7 @@ describe("runBackfill", () => {
       { "m-promo": promoEmailNoAmount }
     );
 
-    await runBackfill(db, client);
+    await runBackfill(db, client, userId);
 
     const rows = await db.select().from(transactions);
     expect(rows).toHaveLength(1);
@@ -231,7 +237,7 @@ describe("runBackfill", () => {
       { "m-clean": cleanTransactionEmail }
     );
 
-    const result = await runBackfill(db, client);
+    const result = await runBackfill(db, client, userId);
 
     expect(result.nextPageToken).toBe("page2token");
     const [run] = await db.select().from(captureRuns);
@@ -241,13 +247,13 @@ describe("runBackfill", () => {
 
   test("resuming from a saved pageToken does not reprocess the first page", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "job_did_not_run", backfillPageToken: "page2token" });
+    await db.insert(captureRuns).values({ userId, runStatus: "job_did_not_run", backfillPageToken: "page2token" });
     const client = fakeClient(
       { page2token: { messages: [{ id: "m-pkr" }] } },
       { "m-pkr": pkrFormatEmail }
     );
 
-    const result = await runBackfill(db, client);
+    const result = await runBackfill(db, client, userId);
 
     expect(result.processed).toBe(1);
     const rows = await db.select().from(transactions);
@@ -261,7 +267,7 @@ describe("runBackfill", () => {
       { "m-clean": cleanTransactionEmail }
     );
 
-    await runBackfill(db, client, { maxMessagesPerChunk: 7 });
+    await runBackfill(db, client, userId, { maxMessagesPerChunk: 7 });
 
     expect(client.listMessagesCalls[0].maxResults).toBe(7);
   });
@@ -272,7 +278,7 @@ describe("runBackfill", () => {
       { first: { messages: [{ id: "m-clean" }] } }, // no nextPageToken -> backfill finishes
       { "m-clean": cleanTransactionEmail }
     );
-    await runBackfill(db, completingClient);
+    await runBackfill(db, completingClient, userId);
     const [afterFirstRun] = await db.select().from(captureRuns);
     expect(afterFirstRun.backfillCompletedAt).not.toBeNull();
 
@@ -280,7 +286,7 @@ describe("runBackfill", () => {
       { first: { messages: [{ id: "m-clean" }] } },
       { "m-clean": cleanTransactionEmail }
     );
-    const result = await runBackfill(db, secondClient);
+    const result = await runBackfill(db, secondClient, userId);
 
     expect(result.processed).toBe(0);
     expect(secondClient.listMessagesCalls).toHaveLength(0);
@@ -292,13 +298,13 @@ describe("runBackfill", () => {
     const db = drizzle(env.DB);
     const page: FakePage = { messages: [{ id: "m-clean" }], nextPageToken: "page2token" };
     const client1 = fakeClient({ first: page }, { "m-clean": cleanTransactionEmail });
-    await runBackfill(db, client1);
+    await runBackfill(db, client1, userId);
 
     // Simulate "the checkpoint never advanced" by resetting it back to
     // the same starting point and re-running against the same messages.
     await db.update(captureRuns).set({ backfillPageToken: null, backfillCompletedAt: null });
     const client2 = fakeClient({ first: page }, { "m-clean": cleanTransactionEmail });
-    await runBackfill(db, client2);
+    await runBackfill(db, client2, userId);
 
     const rows = await db.select().from(transactions);
     expect(rows).toHaveLength(1); // not 2 -- onConflictDoNothing on gmailMessageId
@@ -312,7 +318,7 @@ describe("runBackfill", () => {
       { failGetMessageIds: ["m-clean"] }
     );
 
-    const result = await runBackfill(db, client);
+    const result = await runBackfill(db, client, userId);
 
     expect(result.processed).toBe(1); // only m-pkr succeeded
     const rows = await db.select().from(transactions);
@@ -322,7 +328,7 @@ describe("runBackfill", () => {
 
   test("[I1] a whole-page Gmail API failure does not advance or clear the checkpoint, and records the error type", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "job_did_not_run", backfillPageToken: "page5token" });
+    await db.insert(captureRuns).values({ userId, runStatus: "job_did_not_run", backfillPageToken: "page5token" });
     const { GmailApiError } = await import("../src/adapters/gmailClient");
     const client = fakeClient(
       {},
@@ -330,7 +336,7 @@ describe("runBackfill", () => {
       { failListOnce: new GmailApiError(401, "auth_failure", "token expired") }
     );
 
-    const result = await runBackfill(db, client);
+    const result = await runBackfill(db, client, userId);
 
     expect(result.processed).toBe(0);
     const [run] = await db.select().from(captureRuns);
@@ -342,7 +348,7 @@ describe("runBackfill", () => {
 
   test("a committed Gmail transaction is dedup-checked against an existing statement_import transaction", async () => {
     const db = drizzle(env.DB);
-    await db.insert(transactions).values({
+    await db.insert(transactions).values({ userId,
       amount: -125000,
       date: "2026-10-27",
       vendorRaw: "Starbucks Coffee",
@@ -357,7 +363,7 @@ describe("runBackfill", () => {
       { first: { messages: [{ id: "m-clean" }] } },
       { "m-clean": { ...cleanTransactionEmail, bodyText: "You spent Rs. 1,250.00 at Starbucks on 2026-10-27." } }
     );
-    await runBackfill(db, client);
+    await runBackfill(db, client, userId);
 
     const [gmailRow] = await db.select().from(transactions).where(eq(transactions.source, "gmail_email"));
     expect(gmailRow.dedupGroupId).not.toBeNull();
@@ -365,7 +371,7 @@ describe("runBackfill", () => {
 
   test("a quarantined Gmail transaction is never dedup-checked", async () => {
     const db = drizzle(env.DB);
-    await db.insert(transactions).values({
+    await db.insert(transactions).values({ userId,
       amount: 0,
       date: "2026-10-27",
       vendorRaw: "(unavailable)",
@@ -380,7 +386,7 @@ describe("runBackfill", () => {
       { first: { messages: [{ id: "m-promo" }] } },
       { "m-promo": promoEmailNoAmount }
     );
-    await runBackfill(db, client);
+    await runBackfill(db, client, userId);
 
     const [gmailRow] = await db.select().from(transactions).where(eq(transactions.source, "gmail_email"));
     expect(gmailRow.dedupGroupId).toBeNull();
@@ -396,7 +402,7 @@ describe("runBackfill", () => {
       { "m-clean": cleanTransactionEmail }
     );
 
-    const result = await runBackfill(db, client);
+    const result = await runBackfill(db, client, userId);
 
     expect(result.processed).toBe(1); // the row still landed
     const rows = await db.select().from(transactions);
@@ -416,7 +422,7 @@ describe("runBackfill", () => {
     );
     client.getCurrentHistoryId = async () => "500";
 
-    await runBackfill(db, client);
+    await runBackfill(db, client, userId);
 
     const [run] = await db.select().from(captureRuns);
     expect(run.backfillCompletedAt).toBeNull(); // backfill itself is not done yet
@@ -425,7 +431,7 @@ describe("runBackfill", () => {
 
   test("[C3] a later backfill call (resuming from a saved pageToken) does not re-seed an already-set pollingHistoryId", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({
+    await db.insert(captureRuns).values({ userId,
       runStatus: "success",
       backfillPageToken: "page2",
       pollingHistoryId: "500",
@@ -438,7 +444,7 @@ describe("runBackfill", () => {
       throw new Error("must not be called again once pollingHistoryId is already seeded");
     };
 
-    await runBackfill(db, client);
+    await runBackfill(db, client, userId);
 
     const [run] = await db.select().from(captureRuns);
     expect(run.pollingHistoryId).toBe("500"); // unchanged
@@ -455,7 +461,7 @@ describe("runBackfill", () => {
       throw new GmailApiError(401, "auth_failure", "token expired");
     };
 
-    const result = await runBackfill(db, client);
+    const result = await runBackfill(db, client, userId);
 
     expect(result.processed).toBe(0);
     expect(client.listMessagesCalls).toHaveLength(0);
@@ -471,7 +477,7 @@ describe("runBackfill", () => {
 describe("runOngoingPoll", () => {
   test("processes newly-added messages found via history, same parse/categorize/dedup path as backfill", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    await db.insert(captureRuns).values({ userId, runStatus: "success", pollingHistoryId: "100" });
     const client = fakeClient({ first: { messages: [] } }, {});
     client.listHistory = async (startHistoryId, _maxResults) => {
       expect(startHistoryId).toBe("100");
@@ -479,7 +485,7 @@ describe("runOngoingPoll", () => {
     };
     client.getMessage = async (id) => (id === "m-clean" ? cleanTransactionEmail : (undefined as never));
 
-    const result = await runOngoingPoll(db, client);
+    const result = await runOngoingPoll(db, client, userId);
 
     expect(result.processed).toBe(1);
     const rows = await db.select().from(transactions);
@@ -493,8 +499,8 @@ describe("runOngoingPoll", () => {
 
   test("a message already captured by backfill (same gmail_message_id) is never duplicated", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
-    await db.insert(transactions).values({
+    await db.insert(captureRuns).values({ userId, runStatus: "success", pollingHistoryId: "100" });
+    await db.insert(transactions).values({ userId,
       amount: 125000,
       date: "2026-10-27",
       vendorRaw: "Starbucks",
@@ -509,7 +515,7 @@ describe("runOngoingPoll", () => {
     client.listHistory = async () => ({ addedMessageIds: ["m-clean"], newHistoryId: "200" });
     client.getMessage = async () => cleanTransactionEmail;
 
-    await runOngoingPoll(db, client);
+    await runOngoingPoll(db, client, userId);
 
     const rows = await db.select().from(transactions);
     expect(rows).toHaveLength(1); // not duplicated
@@ -517,11 +523,11 @@ describe("runOngoingPoll", () => {
 
   test("a quiet poll (no new messages) is healthy, not an error", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    await db.insert(captureRuns).values({ userId, runStatus: "success", pollingHistoryId: "100" });
     const client = fakeClient({ first: { messages: [] } }, {});
     client.listHistory = async () => ({ addedMessageIds: [], newHistoryId: "100" });
 
-    const result = await runOngoingPoll(db, client);
+    const result = await runOngoingPoll(db, client, userId);
 
     expect(result.processed).toBe(0);
     const [run] = await db.select().from(captureRuns);
@@ -530,7 +536,7 @@ describe("runOngoingPoll", () => {
 
   test("[C1] a message from history that isn't from NayaPay is skipped entirely -- no row, not even quarantined", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    await db.insert(captureRuns).values({ userId, runStatus: "success", pollingHistoryId: "100" });
     const client = fakeClient({ first: { messages: [] } }, {});
     client.listHistory = async () => ({ addedMessageIds: ["m-other"], newHistoryId: "200" });
     client.getMessage = async () => ({
@@ -542,7 +548,7 @@ describe("runOngoingPoll", () => {
       bodyText: "Here's what's new this week.",
     });
 
-    const result = await runOngoingPoll(db, client);
+    const result = await runOngoingPoll(db, client, userId);
 
     expect(result.processed).toBe(0);
     const rows = await db.select().from(transactions);
@@ -553,7 +559,7 @@ describe("runOngoingPoll", () => {
 
   test("[C2] pages through history until nextPageToken is exhausted, watermark lands on the last page's historyId", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    await db.insert(captureRuns).values({ userId, runStatus: "success", pollingHistoryId: "100" });
     const client = fakeClient({ first: { messages: [] } }, { "m-clean": cleanTransactionEmail });
     const pagesSeen: (string | undefined)[] = [];
     client.listHistory = async (_startHistoryId, _maxResults, pageToken) => {
@@ -564,7 +570,7 @@ describe("runOngoingPoll", () => {
       return { addedMessageIds: ["m-clean"], newHistoryId: "200" };
     };
 
-    const result = await runOngoingPoll(db, client);
+    const result = await runOngoingPoll(db, client, userId);
 
     expect(pagesSeen).toEqual([undefined, "page2"]);
     expect(result.processed).toBe(1);
@@ -574,7 +580,7 @@ describe("runOngoingPoll", () => {
 
   test("[I1] a history_expired failure reseeds the watermark from getCurrentHistoryId instead of getting stuck", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    await db.insert(captureRuns).values({ userId, runStatus: "success", pollingHistoryId: "100" });
     const { GmailApiError } = await import("../src/adapters/gmailClient");
     const client = fakeClient({ first: { messages: [] } }, {});
     client.listHistory = async () => {
@@ -582,7 +588,7 @@ describe("runOngoingPoll", () => {
     };
     client.getCurrentHistoryId = async () => "999";
 
-    const result = await runOngoingPoll(db, client);
+    const result = await runOngoingPoll(db, client, userId);
 
     expect(result.processed).toBe(0);
     const [run] = await db.select().from(captureRuns);
@@ -593,7 +599,7 @@ describe("runOngoingPoll", () => {
 
   test("[I2] self-heals a missing pollingHistoryId (e.g. pre-existing data) by seeding it instead of polling forever as a no-op", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({
+    await db.insert(captureRuns).values({ userId,
       runStatus: "success",
       backfillCompletedAt: new Date().toISOString(),
       pollingHistoryId: null,
@@ -604,7 +610,7 @@ describe("runOngoingPoll", () => {
       throw new Error("must not be called in the same run the watermark is first seeded");
     };
 
-    const result = await runOngoingPoll(db, client);
+    const result = await runOngoingPoll(db, client, userId);
 
     expect(result.processed).toBe(0);
     const [run] = await db.select().from(captureRuns);
@@ -615,7 +621,7 @@ describe("runOngoingPoll", () => {
 
   test("[I3] if any message in the batch fails to fetch, the watermark does not advance past it", async () => {
     const db = drizzle(env.DB);
-    await db.insert(captureRuns).values({ runStatus: "success", pollingHistoryId: "100" });
+    await db.insert(captureRuns).values({ userId, runStatus: "success", pollingHistoryId: "100" });
     const client = fakeClient(
       { first: { messages: [] } },
       { "m-clean": cleanTransactionEmail },
@@ -623,7 +629,7 @@ describe("runOngoingPoll", () => {
     );
     client.listHistory = async () => ({ addedMessageIds: ["m-clean", "m-pkr"], newHistoryId: "200" });
 
-    const result = await runOngoingPoll(db, client);
+    const result = await runOngoingPoll(db, client, userId);
 
     expect(result.processed).toBe(1); // m-clean still committed
     const rows = await db.select().from(transactions);
@@ -632,4 +638,68 @@ describe("runOngoingPoll", () => {
     expect(run.pollingHistoryId).toBe("100"); // unchanged -- m-pkr must be retried next run
     expect(run.runStatus).toBe("success");
   });
+});
+
+test("[Review Focus] runBackfill scoped to one user's capture_runs row never reads or advances another user's checkpoint", async () => {
+  const db = drizzle(env.DB);
+  const other = await seedUserAndSession(db);
+  const [original] = await db.insert(captureRuns).values({ userId: other.userId, runStatus: "success", backfillPageToken: "other-page", backfillCompletedAt: "2026-10-01", pollingHistoryId: "other-history" }).returning();
+  const client = fakeClient({ first: { messages: [] } }, {});
+  client.listHistory = async () => { throw new Error("must not read another user's history"); };
+  await runBackfill(db, client, userId);
+  const rows = await db.select().from(captureRuns);
+  expect(rows).toHaveLength(2);
+  expect(rows.find(r => r.userId === other.userId)).toEqual(original);
+  const own = rows.find(r => r.userId === userId)!;
+  expect(own.runStatus).toBe("success");
+  expect(own.pollingHistoryId).toBe("unused");
+});
+test("[Review Focus] every transaction row runBackfill inserts has the calling user's userId", async () => {
+  const db = drizzle(env.DB);
+
+  const low = { ...malformedLayoutEmail, id: "low", from: cleanTransactionEmail.from, subject: malformedLayoutEmail.subject };
+  const client = fakeClient({ first: { messages: [{ id: "high" }, { id: "low" }] } }, { high: cleanTransactionEmail, low });
+  client.listHistory = async () => ({ addedMessageIds: ["high", "low"], newHistoryId: "200" });
+  await runBackfill(db, client, userId);
+  const rows = await db.select().from(transactions);
+  expect(rows.map(r => r.reviewStatus).sort()).toEqual(["committed", "pending_review"]);
+  expect(rows.map(r => r.userId)).toEqual([userId, userId]);
+});
+
+test("[Review Focus] runOngoingPoll scoped to one user's capture_runs row never reads or advances another user's checkpoint", async () => {
+  const db = drizzle(env.DB);
+  const other = await seedUserAndSession(db);
+  const [original] = await db.insert(captureRuns).values({ userId: other.userId, runStatus: "success", backfillPageToken: "other-page", backfillCompletedAt: "2026-10-01", pollingHistoryId: "other-history" }).returning();
+  const client = fakeClient({ first: { messages: [] } }, {});
+  client.listHistory = async () => { throw new Error("must not read another user's history"); };
+  await runOngoingPoll(db, client, userId);
+  const rows = await db.select().from(captureRuns);
+  expect(rows).toHaveLength(2);
+  expect(rows.find(r => r.userId === other.userId)).toEqual(original);
+  const own = rows.find(r => r.userId === userId)!;
+  expect(own.runStatus).toBe("success");
+  expect(own.pollingHistoryId).toBe("unused");
+});
+test("[Review Focus] every transaction row runOngoingPoll inserts has the calling user's userId", async () => {
+  const db = drizzle(env.DB);
+  await db.insert(captureRuns).values({ userId, runStatus: "success", pollingHistoryId: "100" });
+  const low = { ...malformedLayoutEmail, id: "low", from: cleanTransactionEmail.from, subject: malformedLayoutEmail.subject };
+  const client = fakeClient({ first: { messages: [{ id: "high" }, { id: "low" }] } }, { high: cleanTransactionEmail, low });
+  client.listHistory = async () => ({ addedMessageIds: ["high", "low"], newHistoryId: "200" });
+  await runOngoingPoll(db, client, userId);
+  const rows = await db.select().from(transactions);
+  expect(rows.map(r => r.reviewStatus).sort()).toEqual(["committed", "pending_review"]);
+  expect(rows.map(r => r.userId)).toEqual([userId, userId]);
+});
+
+test("[Review Focus] identical purchases belonging to different users are never dedup matched", async () => {
+  const db = drizzle(env.DB);
+  const other = await seedUserAndSession(db);
+  await db.insert(transactions).values({ userId: other.userId, amount: -125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" });
+  const client = fakeClient({ first: { messages: [{ id: "m-clean" }] } }, { "m-clean": { ...cleanTransactionEmail, bodyText: "You spent Rs. 1,250.00 at Starbucks on 2026-10-27." } });
+  await runBackfill(db, client, userId);
+  const rows = await db.select().from(transactions);
+  expect(rows).toHaveLength(2);
+  expect(rows.every(r => r.dedupGroupId === null)).toBe(true);
+  expect(rows.map(r => r.userId).sort()).toEqual([userId, other.userId].sort());
 });

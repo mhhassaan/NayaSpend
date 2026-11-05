@@ -1,8 +1,16 @@
+import { seedUserAndSession } from "./helpers/authedRequest";
+import { eq } from "drizzle-orm";
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { missedTransactionsRoutes } from "../src/routes/missedTransactions";
 import { transactions } from "../src/db/schema";
+
+let userId: number;
+let cookie: string;
+beforeEach(async () => {
+  ({ userId, cookie } = await seedUserAndSession(drizzle(env.DB)));
+});
 
 describe("missedTransactions routes", () => {
   test("POST / logs a committed transaction and returns 201 with its id and category", async () => {
@@ -10,7 +18,7 @@ describe("missedTransactions routes", () => {
       "/",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ vendorRaw: "Corner Store", amountCents: 50000, date: "2026-10-27" }),
       },
       env
@@ -29,7 +37,7 @@ describe("missedTransactions routes", () => {
       "/",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ vendorRaw: "x", amountCents: -5, date: "2026-10-27" }),
       },
       env
@@ -48,7 +56,7 @@ describe("missedTransactions routes", () => {
       "/",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { Cookie: cookie, "Content-Type": "application/json" },
         body: JSON.stringify({ vendorRaw: "x", amountCents: 100, date: "2026-10-27" }),
       },
       env
@@ -61,10 +69,23 @@ describe("missedTransactions routes", () => {
   test("POST / with a malformed JSON body returns 400, not a 500", async () => {
     const res = await missedTransactionsRoutes.request(
       "/",
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: "not json" },
+      { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: "not json" },
       env
     );
 
     expect(res.status).toBe(400);
   });
+});
+
+test("[Review Focus] a transaction logged by one user is not visible when queried as another user", async () => {
+  const db = drizzle(env.DB);
+  const other = await seedUserAndSession(db);
+  const res = await missedTransactionsRoutes.request("/", {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ vendorRaw: "Corner Store", amountCents: 500, date: "2026-10-27" }),
+  }, env);
+  expect(res.status).toBe(201);
+  expect(await db.select().from(transactions).where(eq(transactions.userId, other.userId))).toEqual([]);
+  const [row] = await db.select().from(transactions);
+  expect(row.userId).toBe(userId);
 });

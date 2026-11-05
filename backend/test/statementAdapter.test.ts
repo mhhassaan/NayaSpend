@@ -1,7 +1,8 @@
+import { seedUserAndSession } from "./helpers/authedRequest";
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import { transactions } from "../src/db/schema";
 import { importStatementCsv, parseStatementCsv } from "../src/adapters/statementAdapter";
 import {
@@ -16,6 +17,11 @@ import {
   trailingMinusCsv,
   unrecognizedColumnsCsv,
 } from "./fixtures/sampleStatements";
+
+let userId: number;
+beforeEach(async () => {
+  ({ userId } = await seedUserAndSession(drizzle(env.DB)));
+});
 
 describe("parseStatementCsv", () => {
   test("parses clean rows including a parenthesized negative amount", () => {
@@ -124,7 +130,7 @@ describe("parseStatementCsv", () => {
 describe("importStatementCsv", () => {
   test("writes high-confidence rows as committed statement_import transactions", async () => {
     const db = drizzle(env.DB);
-    const result = await importStatementCsv(db, cleanCsv, "file-1");
+    const result = await importStatementCsv(db, cleanCsv, "file-1", userId);
     expect(result.imported).toBe(3);
     const rows = await db.select().from(transactions);
     expect(rows.every((r) => r.source === "statement_import")).toBe(true);
@@ -133,7 +139,7 @@ describe("importStatementCsv", () => {
 
   test("writes low-confidence rows as pending_review with the reason and fileRef/rowIndex in provenance", async () => {
     const db = drizzle(env.DB);
-    await importStatementCsv(db, mixedCsv, "file-3");
+    await importStatementCsv(db, mixedCsv, "file-3", userId);
     const rows = await db.select().from(transactions).where(eq(transactions.reviewStatus, "pending_review"));
     expect(rows).toHaveLength(1);
     const provenance = JSON.parse(rows[0].provenance);
@@ -144,7 +150,7 @@ describe("importStatementCsv", () => {
 
   test("a committed CSV row is dedup-checked against an existing gmail_email transaction", async () => {
     const db = drizzle(env.DB);
-    await db.insert(transactions).values({
+    await db.insert(transactions).values({ userId,
       amount: 125000,
       date: "2026-10-27",
       vendorRaw: "Starbucks",
@@ -156,7 +162,7 @@ describe("importStatementCsv", () => {
     });
 
     const singleRowCsv = `Date,Description,Amount\n2026-10-27,Starbucks Coffee,1250.00\n`;
-    await importStatementCsv(db, singleRowCsv, "file-dedup");
+    await importStatementCsv(db, singleRowCsv, "file-dedup", userId);
 
     const [stmtRow] = await db.select().from(transactions).where(eq(transactions.source, "statement_import"));
     expect(stmtRow.dedupGroupId).not.toBeNull();
@@ -169,7 +175,7 @@ describe("importStatementCsv", () => {
     // committed-only/reviewStatus filter in importStatementCsv or
     // runDedupCheck were ever removed, this would still match and this
     // test would catch it.
-    await db.insert(transactions).values({
+    await db.insert(transactions).values({ userId,
       amount: 0,
       date: new Date().toISOString().slice(0, 10),
       vendorRaw: "(unrecognized)",
@@ -180,7 +186,7 @@ describe("importStatementCsv", () => {
       reviewStatus: "committed",
     });
 
-    await importStatementCsv(db, unrecognizedColumnsCsv, "file-unrec");
+    await importStatementCsv(db, unrecognizedColumnsCsv, "file-unrec", userId);
 
     const [stmtRow] = await db.select().from(transactions).where(eq(transactions.source, "statement_import"));
     expect(stmtRow.dedupGroupId).toBeNull();
@@ -188,10 +194,21 @@ describe("importStatementCsv", () => {
 
   test("[I1] re-importing the same file (e.g. a retry after a partial failure) does not duplicate rows", async () => {
     const db = drizzle(env.DB);
-    await importStatementCsv(db, cleanCsv, "file-retry");
-    await importStatementCsv(db, cleanCsv, "file-retry");
+    await importStatementCsv(db, cleanCsv, "file-retry", userId);
+    await importStatementCsv(db, cleanCsv, "file-retry", userId);
 
     const rows = await db.select().from(transactions);
     expect(rows).toHaveLength(3); // not 6
   });
+});
+
+test("[Review Focus] identical purchases belonging to different users are never dedup matched", async () => {
+  const db = drizzle(env.DB);
+  const other = await seedUserAndSession(db);
+  await db.insert(transactions).values({ userId: other.userId, amount: -125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" });
+  await importStatementCsv(db, "Date,Description,Amount\n2026-10-27,Starbucks,-1250.00\n", "cross-user", userId);
+  const rows = await db.select().from(transactions);
+  expect(rows).toHaveLength(2);
+  expect(rows.every(r => r.dedupGroupId === null)).toBe(true);
+  expect(rows.map(r => r.userId).sort()).toEqual([userId, other.userId].sort());
 });

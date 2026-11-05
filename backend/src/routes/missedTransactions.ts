@@ -1,3 +1,4 @@
+import { requireAuth, type AuthUser } from "../middleware/auth";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { logMissedTransaction, ValidationError } from "../adapters/manualAdapter";
@@ -8,7 +9,9 @@ type Env = {
 
 // [Phase 8 Task 5] Chained so `typeof missedTransactionsRoutes` carries
 // its route's schema -- see the identical fix/explanation in index.ts.
-export const missedTransactionsRoutes = new Hono<{ Bindings: Env }>().post("/", async (c) => {
+export const missedTransactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
+  .use(requireAuth)
+  .post("/", async (c) => {
   let body: { vendorRaw?: unknown; amountCents?: unknown; date?: unknown };
   try {
     body = await c.req.json();
@@ -22,7 +25,7 @@ export const missedTransactionsRoutes = new Hono<{ Bindings: Env }>().post("/", 
       vendorRaw: String(body.vendorRaw ?? ""),
       amountCents: Number(body.amountCents),
       date: String(body.date ?? ""),
-    });
+    }, c.get("user").id);
     return c.json(result, 201);
   } catch (err) {
     // Only a validation failure is the caller's fault (400) -- anything

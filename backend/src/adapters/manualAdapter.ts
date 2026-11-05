@@ -30,7 +30,8 @@ function isValidIsoDate(date: string): boolean {
 // point of this action is to cover a gap those channels didn't.
 export async function logMissedTransaction(
   db: DrizzleD1Database,
-  input: MissedTransactionInput
+  input: MissedTransactionInput,
+  userId: number
 ): Promise<{ id: number; category: string }> {
   const vendorRaw = input.vendorRaw.trim();
   if (!vendorRaw) {
@@ -44,11 +45,12 @@ export async function logMissedTransaction(
   }
 
   const vendorNormalized = normalize(vendorRaw);
-  const category = await categorize(db, vendorNormalized);
+  const category = await categorize(db, vendorNormalized, userId);
 
   const [row] = await db
     .insert(transactions)
     .values({
+      userId,
       amount: -input.amountCents,
       date: input.date,
       vendorRaw,

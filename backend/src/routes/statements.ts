@@ -1,3 +1,4 @@
+import { requireAuth, type AuthUser } from "../middleware/auth";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { importStatementCsv, parseStatementCsv } from "../adapters/statementAdapter";
@@ -22,7 +23,9 @@ async function sha256Hex(text: string): Promise<string> {
 
 // [Phase 8 Task 5] Chained so `typeof statementsRoutes` carries its
 // route's schema -- see the identical fix/explanation in index.ts.
-export const statementsRoutes = new Hono<{ Bindings: Env }>().post("/", async (c) => {
+export const statementsRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
+  .use(requireAuth)
+  .post("/", async (c) => {
   const body = await c.req.parseBody();
   const file = body.file;
 
@@ -52,7 +55,7 @@ export const statementsRoutes = new Hono<{ Bindings: Env }>().post("/", async (c
   }
 
   const db = drizzle(c.env.DB);
-  const result = await importStatementCsv(db, text, fileRef);
+  const result = await importStatementCsv(db, text, fileRef, c.get("user").id);
 
   return c.json(result, 201);
 });
