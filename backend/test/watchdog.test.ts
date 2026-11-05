@@ -1,11 +1,12 @@
+import { seedUserAndSession } from "./helpers/authedRequest";
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { captureRuns, gmailCredentials } from "../src/db/schema";
 import { checkCaptureHealth } from "../src/services/watchdog";
 
 async function connectGmail(db: ReturnType<typeof drizzle>) {
-  await db.insert(gmailCredentials).values({
+  await db.insert(gmailCredentials).values({ userId,
     encryptedAccessToken: "fake",
     encryptedRefreshToken: "fake",
     expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -22,13 +23,18 @@ const testEnv = {
   NOTIFICATION_EMAIL: "user@example.com",
 };
 
+let userId: number;
+beforeEach(async () => {
+  ({ userId } = await seedUserAndSession(drizzle(env.DB)));
+});
+
 describe("checkCaptureHealth", () => {
   test("no Gmail account connected yet is healthy, not escalated -- there is no job that should be running", async () => {
     const db = drizzle(env.DB);
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await checkCaptureHealth(db, testEnv);
+    const result = await checkCaptureHealth(db, testEnv, userId);
 
     expect(result.escalated).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -38,11 +44,11 @@ describe("checkCaptureHealth", () => {
     const db = drizzle(env.DB);
     await connectGmail(db);
     const now = new Date().toISOString();
-    await db.insert(captureRuns).values({ runStatus: "success", lastAttemptedRun: now, lastSuccessfulRun: now });
+    await db.insert(captureRuns).values({ userId, runStatus: "success", lastAttemptedRun: now, lastSuccessfulRun: now });
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await checkCaptureHealth(db, testEnv);
+    const result = await checkCaptureHealth(db, testEnv, userId);
 
     expect(result.escalated).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -52,7 +58,7 @@ describe("checkCaptureHealth", () => {
     const db = drizzle(env.DB);
     await connectGmail(db);
     const fortyMinutesAgo = new Date(Date.now() - 40 * 60 * 1000).toISOString();
-    await db.insert(captureRuns).values({
+    await db.insert(captureRuns).values({ userId,
       runStatus: "api_call_failed",
       errorType: "network_timeout",
       lastAttemptedRun: fortyMinutesAgo,
@@ -61,7 +67,7 @@ describe("checkCaptureHealth", () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await checkCaptureHealth(db, testEnv);
+    const result = await checkCaptureHealth(db, testEnv, userId);
 
     expect(result.escalated).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -71,7 +77,7 @@ describe("checkCaptureHealth", () => {
     const db = drizzle(env.DB);
     await connectGmail(db);
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-    await db.insert(captureRuns).values({
+    await db.insert(captureRuns).values({ userId,
       runStatus: "api_call_failed",
       errorType: "auth_failure",
       lastAttemptedRun: twoHoursAgo,
@@ -85,7 +91,7 @@ describe("checkCaptureHealth", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await checkCaptureHealth(db, testEnv);
+    const result = await checkCaptureHealth(db, testEnv, userId);
 
     expect(result.escalated).toBe(true);
     expect(fetchSpy).toHaveBeenCalledOnce();
@@ -95,7 +101,7 @@ describe("checkCaptureHealth", () => {
     const db = drizzle(env.DB);
     await connectGmail(db);
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
-    await db.insert(captureRuns).values({
+    await db.insert(captureRuns).values({ userId,
       runStatus: "api_call_failed",
       errorType: "rate_limit",
       lastAttemptedRun: twoHoursAgo,
@@ -108,7 +114,7 @@ describe("checkCaptureHealth", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await checkCaptureHealth(db, testEnv);
+    const result = await checkCaptureHealth(db, testEnv, userId);
 
     expect(result.escalated).toBe(true);
   });
@@ -116,7 +122,7 @@ describe("checkCaptureHealth", () => {
   test("a job that simply never ran (job_did_not_run, no lastSuccessfulRun ever) escalates with that specific reason", async () => {
     const db = drizzle(env.DB);
     await connectGmail(db);
-    await db.insert(captureRuns).values({ runStatus: "job_did_not_run" });
+    await db.insert(captureRuns).values({ userId, runStatus: "job_did_not_run" });
     const fetchSpy = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(init.body as string);
       expect(body.text).toContain("didn't run");
@@ -124,7 +130,7 @@ describe("checkCaptureHealth", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await checkCaptureHealth(db, testEnv);
+    const result = await checkCaptureHealth(db, testEnv, userId);
 
     expect(result.escalated).toBe(true);
   });
@@ -133,7 +139,7 @@ describe("checkCaptureHealth", () => {
     const db = drizzle(env.DB);
     await connectGmail(db);
     const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-    await db.insert(captureRuns).values({
+    await db.insert(captureRuns).values({ userId,
       runStatus: "success",
       lastAttemptedRun: threeHoursAgo,
       lastSuccessfulRun: threeHoursAgo,
@@ -145,7 +151,7 @@ describe("checkCaptureHealth", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await checkCaptureHealth(db, testEnv);
+    const result = await checkCaptureHealth(db, testEnv, userId);
 
     expect(result.escalated).toBe(true);
     expect(fetchSpy).toHaveBeenCalledOnce();
@@ -161,8 +167,24 @@ describe("checkCaptureHealth", () => {
     });
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await checkCaptureHealth(db, testEnv);
+    const result = await checkCaptureHealth(db, testEnv, userId);
 
     expect(result.escalated).toBe(true);
   });
+});
+
+test("[Review Focus] watchdog compares only the requested user's credentials and capture state", async () => {
+  const db = drizzle(env.DB);
+  const other = await seedUserAndSession(db);
+  await db.insert(gmailCredentials).values({ userId: other.userId, encryptedAccessToken: "fake", encryptedRefreshToken: "fake", expiresAt: new Date().toISOString() });
+  await db.insert(captureRuns).values({ userId: other.userId, runStatus: "api_call_failed", errorType: "auth_failure" });
+  const fetchSpy = vi.fn(async () => new Response("{}"));
+  vi.stubGlobal("fetch", fetchSpy);
+  expect(await checkCaptureHealth(db, testEnv, userId)).toEqual({ escalated: false });
+  expect(fetchSpy).not.toHaveBeenCalled();
+  await connectGmail(db);
+  const now = new Date().toISOString();
+  await db.insert(captureRuns).values({ userId, runStatus: "success", lastAttemptedRun: now, lastSuccessfulRun: now });
+  expect(await checkCaptureHealth(db, testEnv, userId)).toEqual({ escalated: false });
+  expect(fetchSpy).not.toHaveBeenCalled();
 });

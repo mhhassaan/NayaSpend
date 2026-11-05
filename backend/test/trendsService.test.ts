@@ -1,11 +1,12 @@
+import { seedUserAndSession } from "./helpers/authedRequest";
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import { getMonthlyTrends, getTrendsHistory } from "../src/services/trendsService";
 import { transactions } from "../src/db/schema";
 
 async function seed(db: ReturnType<typeof drizzle>, overrides: Partial<typeof transactions.$inferInsert> = {}) {
-  await db.insert(transactions).values({
+  await db.insert(transactions).values({ userId,
     amount: -5000,
     date: "2026-10-15",
     vendorRaw: "x",
@@ -18,6 +19,11 @@ async function seed(db: ReturnType<typeof drizzle>, overrides: Partial<typeof tr
   });
 }
 
+let userId: number;
+beforeEach(async () => {
+  ({ userId } = await seedUserAndSession(drizzle(env.DB)));
+});
+
 describe("getMonthlyTrends", () => {
   test("sums committed transactions by category for the given month", async () => {
     const db = drizzle(env.DB);
@@ -25,7 +31,7 @@ describe("getMonthlyTrends", () => {
     await seed(db, { amount: -3000, category: "Coffee" });
     await seed(db, { amount: -2000, category: "Groceries" });
 
-    const result = await getMonthlyTrends(db, "2026-10");
+    const result = await getMonthlyTrends(db, "2026-10", userId);
 
     expect(result.spentCents).toBe(10000);
     expect(result.receivedCents).toBe(0);
@@ -40,7 +46,7 @@ describe("getMonthlyTrends", () => {
     await seed(db, { amount: -5000, category: "Transfers" });
     await seed(db, { amount: 12000, category: "Transfers" });
     await seed(db, { amount: 3000, category: "Salary" });
-    const result = await getMonthlyTrends(db, "2026-10");
+    const result = await getMonthlyTrends(db, "2026-10", userId);
     expect(result.spentCents).toBe(5000);
     expect(result.receivedCents).toBe(15000);
     expect(result.hasData).toBe(true);
@@ -50,7 +56,7 @@ describe("getMonthlyTrends", () => {
   test("an income-only month has no spend data but retains received money", async () => {
     const db = drizzle(env.DB);
     await seed(db, { amount: 12000, category: "Salary" });
-    const result = await getMonthlyTrends(db, "2026-10");
+    const result = await getMonthlyTrends(db, "2026-10", userId);
     expect(result.spentCents).toBe(0);
     expect(result.receivedCents).toBe(12000);
     expect(result.hasData).toBe(false);
@@ -61,7 +67,7 @@ describe("getMonthlyTrends", () => {
     const db = drizzle(env.DB);
     await seed(db, { date: "2026-09-30" });
 
-    const result = await getMonthlyTrends(db, "2026-10");
+    const result = await getMonthlyTrends(db, "2026-10", userId);
 
     expect(result.hasData).toBe(false);
     expect(result.spentCents).toBe(0);
@@ -73,7 +79,7 @@ describe("getMonthlyTrends", () => {
     await seed(db, { deletedAt: new Date().toISOString() });
     await seed(db, { dedupGroupId: "g1", dedupResolution: "pending" });
 
-    const result = await getMonthlyTrends(db, "2026-10");
+    const result = await getMonthlyTrends(db, "2026-10", userId);
 
     expect(result.hasData).toBe(false);
   });
@@ -81,7 +87,7 @@ describe("getMonthlyTrends", () => {
   test("a month with zero matching transactions reports hasData: false instead of a misleadingly empty chart", async () => {
     const db = drizzle(env.DB);
 
-    const result = await getMonthlyTrends(db, "2026-10");
+    const result = await getMonthlyTrends(db, "2026-10", userId);
 
     expect(result.hasData).toBe(false);
     expect(result.byCategory).toEqual([]);
@@ -91,7 +97,7 @@ describe("getMonthlyTrends", () => {
 describe("getTrendsHistory", () => {
   test("returns monthsCount entries, oldest to newest, ending at the current month", async () => {
     const db = drizzle(env.DB);
-    const result = await getTrendsHistory(db, 3);
+    const result = await getTrendsHistory(db, 3, userId);
     expect(result.months).toHaveLength(3);
     const now = new Date();
     const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -102,14 +108,14 @@ describe("getTrendsHistory", () => {
     const db = drizzle(env.DB);
     const now = new Date();
     const thisMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-    await db.insert(transactions).values({
+    await db.insert(transactions).values({ userId,
       amount: -1000, date: `${thisMonth}-05`, vendorRaw: "x", vendorNormalized: "x", category: "Coffee",
       source: "manual_missed", provenance: "{}", reviewStatus: "committed",
     });
 
     await seed(db, { amount: 2500, date: `${thisMonth}-06` });
 
-    const result = await getTrendsHistory(db, 2);
+    const result = await getTrendsHistory(db, 2, userId);
 
     expect(result.months[1].spentCents).toBe(1000);
     expect(result.months[1].receivedCents).toBe(2500);
@@ -117,4 +123,17 @@ describe("getTrendsHistory", () => {
     expect(result.months[1].hasData).toBe(true);
     expect(result.months[0].hasData).toBe(false);
   });
+});
+
+test("[Review Focus] getMonthlyTrends/getTrendsHistory never include another user's transactions", async () => {
+  const db = drizzle(env.DB);
+  const other = await seedUserAndSession(db);
+  const month = new Date().toISOString().slice(0, 7);
+  await seed(db, { date: `${month}-05`, amount: -1000 });
+  await seed(db, { date: `${month}-06`, amount: 2000 });
+  await seed(db, { userId: other.userId, date: `${month}-05`, amount: -9000, category: "Other" });
+  await seed(db, { userId: other.userId, date: `${month}-06`, amount: 8000 });
+  const expected = { month, spentCents: 1000, receivedCents: 2000, byCategory: [{ category: "Coffee", totalCents: 1000 }], hasData: true };
+  expect(await getMonthlyTrends(db, month, userId)).toEqual(expected);
+  expect(await getTrendsHistory(db, 1, userId)).toEqual({ months: [expected] });
 });

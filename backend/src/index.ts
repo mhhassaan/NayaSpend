@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { captureRuns } from "./db/schema";
+import { bills, budgets, captureRuns, gmailCredentials } from "./db/schema";
 import { GmailApiError } from "./adapters/gmailClient";
 import { runCaptureScheduler } from "./services/captureScheduler";
 import { checkCaptureHealth } from "./services/watchdog";
@@ -45,44 +45,52 @@ const app = new Hono<{ Bindings: Env }>()
 
 export type AppType = typeof app;
 
-async function recordDispatchFailure(env: Env, err: unknown) {
+async function recordDispatchFailure(env: Env, err: unknown, userId: number) {
   const db = drizzle(env.DB);
-  const [existing] = await db.select().from(captureRuns);
+  const [existing] = await db.select().from(captureRuns).where(eq(captureRuns.userId, userId));
   const values = {
+    userId,
     lastAttemptedRun: new Date().toISOString(),
     runStatus: "api_call_failed" as const,
     errorType: err instanceof GmailApiError ? err.errorType : "unknown",
   };
   if (existing) {
-    await db.update(captureRuns).set(values).where(eq(captureRuns.id, existing.id));
+    await db.update(captureRuns).set(values).where(and(eq(captureRuns.id, existing.id), eq(captureRuns.userId, userId)));
   } else {
     await db.insert(captureRuns).values(values);
   }
 }
 
 async function dispatchCapture(env: Env) {
-  let client;
-  try {
-    client = await getGmailClient(drizzle(env.DB), env);
-  } catch (err) {
-    // A broken refresh (revoked/expired refresh_token, Gmail outage) must
-    // still be recorded -- this happens before runCaptureScheduler's own
-    // error handling ever runs, so nothing else will record it.
-    await recordDispatchFailure(env, err);
-    return;
-  }
-  if (!client) {
-    // No Gmail account connected yet -- nothing to poll. Not an error
-    // (CUJ 1 hasn't happened yet for this user).
-    return;
-  }
   const db = drizzle(env.DB);
-  await runCaptureScheduler(db, client, env.CAPTURE_RETRY_QUEUE);
+  const credentialRows = await db.select({ userId: gmailCredentials.userId }).from(gmailCredentials);
+  for (const { userId } of credentialRows) {
+    try {
+      let client;
+      try {
+        client = await getGmailClient(db, env, userId);
+      } catch (err) {
+        // Credential failures happen before the scheduler can record them.
+        await recordDispatchFailure(env, err, userId);
+        throw err;
+      }
+      if (client) await runCaptureScheduler(db, client, env.CAPTURE_RETRY_QUEUE, userId);
+    } catch (err) {
+      console.error(`capture dispatch failed for user ${userId}:`, err);
+    }
+  }
 }
 
 async function dispatchWatchdog(env: Env) {
   const db = drizzle(env.DB);
-  await checkCaptureHealth(db, env);
+  const credentialRows = await db.select({ userId: gmailCredentials.userId }).from(gmailCredentials);
+  for (const { userId } of credentialRows) {
+    try {
+      await checkCaptureHealth(db, env, userId);
+    } catch (err) {
+      console.error(`watchdog dispatch failed for user ${userId}:`, err);
+    }
+  }
 }
 
 export default {
@@ -97,8 +105,21 @@ export default {
       } else {
         // Every-6-hours budget/bill evaluation cron.
         const db = drizzle(env.DB);
-        await evaluateBudgets(db, env);
-        await evaluateBills(db, env);
+        const budgetRows = await db.select({ userId: budgets.userId }).from(budgets);
+        const billRows = await db.select({ userId: bills.userId }).from(bills);
+        const userIds = new Set([...budgetRows, ...billRows].map(row => row.userId));
+        for (const userId of userIds) {
+          try {
+            await evaluateBudgets(db, env, userId);
+          } catch (err) {
+            console.error(`budget evaluation failed for user ${userId}:`, err);
+          }
+          try {
+            await evaluateBills(db, env, userId);
+          } catch (err) {
+            console.error(`bill evaluation failed for user ${userId}:`, err);
+          }
+        }
       }
     } catch (err) {
       // A missing/invalid config (e.g. no Gmail connected, bad secrets)
@@ -107,7 +128,7 @@ export default {
     }
   },
 
-  async queue(batch: MessageBatch<{ attempt: number }>, env: Env) {
+  async queue(batch: MessageBatch<{ attempt: number; userId: number }>, env: Env) {
     const db = drizzle(env.DB);
     for (const message of batch.messages) {
       // Each message is acked regardless of outcome: runCaptureScheduler
@@ -119,13 +140,13 @@ export default {
       try {
         let client;
         try {
-          client = await getGmailClient(db, env);
+          client = await getGmailClient(db, env, message.body.userId);
         } catch (err) {
-          await recordDispatchFailure(env, err);
+          await recordDispatchFailure(env, err, message.body.userId);
           continue;
         }
         if (!client) continue;
-        await runCaptureScheduler(db, client, env.CAPTURE_RETRY_QUEUE, message.body.attempt);
+        await runCaptureScheduler(db, client, env.CAPTURE_RETRY_QUEUE, message.body.userId, message.body.attempt);
       } catch (err) {
         console.error("queue message processing failed:", err);
       } finally {

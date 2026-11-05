@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { captureRuns } from "../db/schema";
 import { runBackfill, runOngoingPoll } from "../adapters/gmailAdapter";
@@ -28,15 +28,16 @@ export async function runCaptureScheduler(
   db: DrizzleD1Database,
   client: GmailClient,
   queue: QueueSender,
+  userId: number,
   attempt = 1
 ): Promise<void> {
-  const [run] = await db.select().from(captureRuns);
+  const [run] = await db.select().from(captureRuns).where(eq(captureRuns.userId, userId));
 
   try {
     if (run?.backfillCompletedAt) {
-      await runOngoingPoll(db, client);
+      await runOngoingPoll(db, client, userId);
     } else {
-      await runBackfill(db, client);
+      await runBackfill(db, client, userId);
     }
   } catch (err) {
     // runBackfill/runOngoingPoll already catch and record every Gmail API
@@ -46,7 +47,7 @@ export async function runCaptureScheduler(
     // must still be recorded here: left unrecorded, run_status keeps its
     // previous value, so neither the retry below nor the Watchdog's own
     // staleness check would ever see this run as having failed.
-    const [existing] = await db.select().from(captureRuns);
+    const [existing] = await db.select().from(captureRuns).where(eq(captureRuns.userId, userId));
     if (existing) {
       await db
         .update(captureRuns)
@@ -55,11 +56,11 @@ export async function runCaptureScheduler(
           runStatus: "api_call_failed",
           errorType: err instanceof GmailApiError ? err.errorType : "unknown",
         })
-        .where(eq(captureRuns.id, existing.id));
+        .where(and(eq(captureRuns.id, existing.id), eq(captureRuns.userId, userId)));
     }
   }
 
-  const [refreshed] = await db.select().from(captureRuns);
+  const [refreshed] = await db.select().from(captureRuns).where(eq(captureRuns.userId, userId));
   if (refreshed?.runStatus !== "api_call_failed") {
     return; // succeeded -- nothing to retry
   }
@@ -76,5 +77,5 @@ export async function runCaptureScheduler(
     return; // Watchdog's own cron picks this up from here
   }
 
-  await queue.send({ attempt: attempt + 1 }, { delaySeconds: RETRY_DELAYS_SECONDS[attempt - 1] });
+  await queue.send({ attempt: attempt + 1, userId }, { delaySeconds: RETRY_DELAYS_SECONDS[attempt - 1] });
 }

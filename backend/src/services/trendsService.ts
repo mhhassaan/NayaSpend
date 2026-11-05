@@ -1,4 +1,4 @@
-import { and, gte, like, lt } from "drizzle-orm";
+import { and, eq, gte, like, lt } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { transactions } from "../db/schema";
 import { committedNotPendingDedup } from "./budgetAlertTrigger";
@@ -11,11 +11,11 @@ export type MonthlyTrends = {
   hasData: boolean;
 };
 
-export async function getMonthlyTrends(db: DrizzleD1Database, month: string): Promise<MonthlyTrends> {
+export async function getMonthlyTrends(db: DrizzleD1Database, month: string, userId: number): Promise<MonthlyTrends> {
   const rows = await db
     .select({ category: transactions.category, amount: transactions.amount })
     .from(transactions)
-    .where(and(like(transactions.date, `${month}%`), committedNotPendingDedup()));
+    .where(and(eq(transactions.userId, userId), like(transactions.date, `${month}%`), committedNotPendingDedup()));
 
   const totals = new Map<string, number>();
   let receivedCents = 0;
@@ -50,7 +50,8 @@ function monthKey(year: number, month0: number): string {
  */
 export async function getTrendsHistory(
   db: DrizzleD1Database,
-  monthsCount: number
+  monthsCount: number,
+  userId: number
 ): Promise<{ months: MonthlyTrends[] }> {
   const now = new Date();
   const currentYear = now.getUTCFullYear();
@@ -70,7 +71,7 @@ export async function getTrendsHistory(
   const rows = await db
     .select({ date: transactions.date, category: transactions.category, amount: transactions.amount })
     .from(transactions)
-    .where(and(gte(transactions.date, earliestDate), lt(transactions.date, afterLatestDate), committedNotPendingDedup()));
+    .where(and(eq(transactions.userId, userId), gte(transactions.date, earliestDate), lt(transactions.date, afterLatestDate), committedNotPendingDedup()));
 
   const byMonth = new Map<string, Map<string, number>>();
   const receivedByMonth = new Map<string, number>();
