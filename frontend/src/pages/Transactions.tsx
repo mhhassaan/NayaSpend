@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { NavLink } from "react-router-dom";
+import { StatementUploadIcon } from "../components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { Card, EmptyState, Modal, Pill, showError, showSuccess } from "../components";
@@ -257,27 +259,46 @@ export function Transactions() {
     if (query.isError) showError("Couldn't load your transactions.");
   }, [query.isError]);
 
+  const header = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <h1 className="font-body text-[20px] font-semibold">Transactions</h1>
+      <NavLink
+        to="/statement-upload"
+        className="flex items-center gap-2 rounded-sm border border-mid-grey bg-hyper-white px-4 py-2 font-body text-[15px] font-semibold text-blackberry"
+      >
+        <StatementUploadIcon aria-hidden="true" />
+        Upload statement
+      </NavLink>
+    </div>
+  );
+
   if (query.isPending) {
     return (
-      <div data-testid="transactions-skeleton" className="flex flex-col gap-3">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-16 animate-pulse rounded-xl bg-mid-grey" />
-        ))}
+      <div className="flex flex-col gap-4">
+        {header}
+        <div data-testid="transactions-skeleton" className="flex flex-col gap-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="h-16 animate-pulse rounded-xl bg-mid-grey" />
+          ))}
+        </div>
       </div>
     );
   }
 
   if (query.isError) {
     return (
-      <div className="flex flex-col items-center gap-4 p-8 text-center">
-        <p className="font-body text-[18px] text-text-secondary">Couldn't load your transactions.</p>
-        <button
-          type="button"
-          className="rounded-md bg-blackberry px-6 py-3 font-body text-[15px] font-semibold text-hyper-white"
-          onClick={() => query.refetch()}
-        >
-          Retry
-        </button>
+      <div className="flex flex-col gap-4">
+        {header}
+        <div className="flex flex-col items-center gap-4 p-8 text-center">
+          <p className="font-body text-[18px] text-text-secondary">Couldn't load your transactions.</p>
+          <button
+            type="button"
+            className="rounded-md bg-blackberry px-6 py-3 font-body text-[15px] font-semibold text-hyper-white"
+            onClick={() => query.refetch()}
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -285,14 +306,22 @@ export function Transactions() {
   const transactions = query.data!;
 
   if (transactions.length === 0) {
-    return <EmptyState message="No transactions yet." />;
+    return (
+      <div className="flex flex-col gap-4">
+        {header}
+        <EmptyState message="No transactions yet." />
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {transactions.map((t) => (
-        <TransactionRow key={t.id} transaction={t} />
-      ))}
+    <div className="flex flex-col gap-4">
+      {header}
+      <div className="flex flex-col gap-3">
+        {transactions.map((t) => (
+          <TransactionRow key={t.id} transaction={t} />
+        ))}
+      </div>
     </div>
   );
 }

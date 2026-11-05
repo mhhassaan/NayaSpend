@@ -32,6 +32,15 @@ function buildTransaction(overrides: Partial<Transaction> = {}): Transaction {
 }
 
 describe("Transactions", () => {
+  test("offers statement upload when there are no transactions", async () => {
+    mockFetch([{ test: urlContains("/api/transactions"), respond: () => jsonResponse([]) }]);
+    renderWithProviders(<Transactions />);
+    expect(await screen.findByText(/no transactions yet/i)).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /upload statement/i });
+    expect(link).toBeInTheDocument();
+    expect(link.getAttribute("href")).toBe("/statement-upload");
+  });
+
   test("shows a skeleton, then the transaction list", async () => {
     mockFetch([
       { test: urlContains("/api/transactions"), respond: () => jsonResponse([buildTransaction({ vendorRaw: "Starbucks", amount: 1250 })]) },

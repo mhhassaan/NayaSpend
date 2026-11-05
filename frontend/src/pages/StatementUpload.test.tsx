@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { StatementUpload } from "./StatementUpload";
@@ -11,6 +11,16 @@ vi.mock("../components", async (importOriginal) => {
 });
 
 describe("StatementUpload", () => {
+  test("dropping a CSV uploads it and shows the imported count", async () => {
+    mockFetch([{ test: urlContains("/api/statements", "POST"), respond: () => jsonResponse({ imported: 5 }, 201) }]);
+    renderWithProviders(<StatementUpload />);
+    const file = new File(["Date,Description,Amount\n2026-10-27,Starbucks,12.50"], "statement.csv", { type: "text/csv" });
+    fireEvent.drop(screen.getByRole("region", { name: /statement file drop zone/i }), { dataTransfer: { files: [file] } });
+    await userEvent.click(screen.getByRole("button", { name: /upload/i }));
+    expect(await screen.findByText("Imported 5 rows")).toBeInTheDocument();
+    await vi.waitFor(() => expect(showSuccess).toHaveBeenCalledOnce());
+  });
+
   test("uploading a CSV posts multipart form data and shows the imported count", async () => {
     mockFetch([{ test: urlContains("/api/statements", "POST"), respond: () => jsonResponse({ imported: 5 }, 201) }]);
     renderWithProviders(<StatementUpload />);
