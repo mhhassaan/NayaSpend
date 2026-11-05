@@ -15,7 +15,7 @@ describe("AppShell", () => {
     expect(screen.getByText("transactions content")).toBeInTheDocument();
   });
 
-  test("renders nav links for the primary pages and a Log transaction quick action", () => {
+  test("renders nav links for the primary pages", () => {
     render(
       <MemoryRouter>
         <AppShell>
@@ -29,7 +29,6 @@ describe("AppShell", () => {
     for (const label of ["Dashboard", "Transactions", "Dedup Review", "Budgets", "Bills", "Capture Health"]) {
       expect(screen.getAllByRole("link", { name: label }).length).toBeGreaterThan(0);
     }
-    expect(screen.getByRole("link", { name: "Log transaction" })).toBeInTheDocument();
   });
 
   test("renders its children inside the shell", () => {

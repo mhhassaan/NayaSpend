@@ -171,11 +171,11 @@ export function Dashboard() {
 
         <Card>
           <div className="mb-3 flex items-center justify-between">
-            <button type="button" aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}>
+            <button type="button" aria-label="Previous month" className="flex h-8 w-8 items-center justify-center rounded-full border border-mid-grey text-text-secondary transition-colors hover:bg-silver-frost" onClick={() => setMonth(shiftMonth(month, -1))}>
               &larr;
             </button>
             <span className="font-body font-semibold">{monthData.month}</span>
-            <button type="button" aria-label="Next month" onClick={() => setMonth(shiftMonth(month, 1))}>
+            <button type="button" aria-label="Next month" className="flex h-8 w-8 items-center justify-center rounded-full border border-mid-grey text-text-secondary transition-colors hover:bg-silver-frost" onClick={() => setMonth(shiftMonth(month, 1))}>
               &rarr;
             </button>
           </div>

@@ -1,7 +1,7 @@
 import { TransactionsEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { StatementUploadIcon } from "../components/icons";
+import { PlusIcon, StatementUploadIcon } from "../components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { Card, EmptyState, ListReveal, Modal, Pill, showError, showSuccess } from "../components";
@@ -263,13 +263,22 @@ export function Transactions() {
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="font-body text-[20px] font-semibold">Transactions</h1>
-      <NavLink
-        to="/statement-upload"
-        className="flex items-center gap-2 rounded-sm border border-mid-grey bg-hyper-white px-4 py-2 font-body text-[15px] font-semibold text-blackberry"
-      >
-        <StatementUploadIcon aria-hidden="true" />
-        Upload statement
-      </NavLink>
+      <div className="flex flex-wrap items-center gap-3">
+        <NavLink
+          to="/statement-upload"
+          className="flex items-center gap-2 rounded-sm border border-mid-grey bg-hyper-white px-4 py-2 font-body text-[15px] font-semibold text-blackberry"
+        >
+          <StatementUploadIcon aria-hidden="true" />
+          Upload statement
+        </NavLink>
+        <NavLink
+          to="/log-transaction"
+          className="flex items-center gap-2 rounded-md bg-blackberry px-4 py-2 font-body text-[15px] font-semibold text-hyper-white"
+        >
+          <PlusIcon />
+          Log transaction
+        </NavLink>
+      </div>
     </div>
   );
 

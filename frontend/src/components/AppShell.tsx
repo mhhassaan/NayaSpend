@@ -7,7 +7,6 @@ import {
   CaptureHealthIcon,
   DashboardIcon,
   DedupIcon,
-  PlusIcon,
   TransactionsIcon,
 } from "./icons";
 
@@ -26,12 +25,9 @@ function navLinkClass({ isActive }: { isActive: boolean }) {
   }`;
 }
 
-// The one layout every page renders inside: a top bar (app name on the
-// left, a "Log transaction" quick action on the right) and a left
-// sidebar (desktop) / bottom tab bar (mobile) for nav between the primary
-// pages. Statement Upload and Log Missed Transaction are reached via
-// Dashboard's quick-action Tile grid, not this primary nav, per the
-// design doc's own page-layout pattern.
+// Shared layout with a desktop sidebar and mobile app-name bar and bottom
+// tabs for navigation between the primary pages. Transaction actions live
+// on the Transactions page and Dashboard's quick-action Tile grid.
 export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   return (
@@ -49,15 +45,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-mid-grey bg-bg-surface px-4 py-3 md:hidden">
           <span className="font-display text-[18px] font-bold text-blackberry">NayaSpend</span>
-        </header>
-        <header className="hidden items-center justify-end border-b border-mid-grey bg-bg-surface px-6 py-3 md:flex">
-          <NavLink
-            to="/log-transaction"
-            className="flex items-center gap-2 rounded-md bg-blackberry px-4 py-2 font-body text-[15px] font-semibold text-hyper-white"
-          >
-            <PlusIcon />
-            Log transaction
-          </NavLink>
         </header>
 
         <main className="flex-1 p-4 pb-20 md:pb-4">
