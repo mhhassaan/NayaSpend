@@ -17,6 +17,7 @@ import { trendsRoutes } from "./routes/trends";
 import { statementsRoutes } from "./routes/statements";
 import { captureRoutes } from "./routes/capture";
 import { authGmailRoutes } from "./routes/authGmail";
+import { authGoogleRoutes } from "./routes/authGoogle";
 
 type Env = ConfigEnv & {
   DB: D1Database;
@@ -39,7 +40,8 @@ const app = new Hono<{ Bindings: Env }>()
   .route("/trends", trendsRoutes)
   .route("/statements", statementsRoutes)
   .route("/capture", captureRoutes)
-  .route("/auth/gmail", authGmailRoutes);
+  .route("/auth/gmail", authGmailRoutes)
+  .route("/auth/google", authGoogleRoutes);
 
 export type AppType = typeof app;
 

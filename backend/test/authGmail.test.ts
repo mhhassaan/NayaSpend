@@ -130,7 +130,7 @@ describe("authGmail routes", () => {
 
   test("GET /callback with an expired (>10 minutes old) state redirects with an error", async () => {
     vi.stubGlobal("fetch", vi.fn());
-    const { signState } = await import("../src/routes/authGmail");
+    const { signState } = await import("../src/oauthState");
     const nonce = "test-nonce";
     const staleState = await signState(Date.now() - 11 * 60 * 1000, nonce, testEnv.TOKEN_ENCRYPTION_KEY);
 
