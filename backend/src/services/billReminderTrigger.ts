@@ -14,12 +14,13 @@ function startOfTodayUtcMs(): number {
 
 export async function evaluateBills(
   db: DrizzleD1Database,
-  env: Partial<ConfigEnv>
+  env: Partial<ConfigEnv>,
+  userId: number
 ): Promise<{ reminded: string[] }> {
   const todayUtcMs = startOfTodayUtcMs();
   const reminded: string[] = [];
 
-  const allBills = await db.select().from(bills);
+  const allBills = await db.select().from(bills).where(eq(bills.userId, userId));
 
   for (const bill of allBills) {
     const dueMs = Date.parse(bill.nextDueDate);

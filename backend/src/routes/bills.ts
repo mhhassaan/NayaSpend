@@ -1,6 +1,7 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { requireAuth, type AuthUser } from "../middleware/auth";
 import { bills } from "../db/schema";
 
 type Env = {
@@ -22,10 +23,11 @@ function isValidIsoDate(date: unknown): date is string {
 
 // [Phase 8 Task 5] Chained so `typeof billsRoutes` carries every route's
 // schema -- see the identical fix/explanation in index.ts.
-export const billsRoutes = new Hono<{ Bindings: Env }>()
+export const billsRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
+  .use(requireAuth)
   .get("/", async (c) => {
     const db = drizzle(c.env.DB);
-    const rows = await db.select().from(bills);
+    const rows = await db.select().from(bills).where(eq(bills.userId, c.get("user").id));
     return c.json(rows);
   })
   .post("/", async (c) => {
@@ -54,7 +56,7 @@ export const billsRoutes = new Hono<{ Bindings: Env }>()
   const db = drizzle(c.env.DB);
   const [row] = await db
     .insert(bills)
-    .values({ vendor, expectedAmount: body.expectedAmount, expectedInterval, nextDueDate: body.nextDueDate })
+    .values({ userId: c.get("user").id, vendor, expectedAmount: body.expectedAmount, expectedInterval, nextDueDate: body.nextDueDate })
     .returning();
 
   return c.json(row, 201);
@@ -62,7 +64,7 @@ export const billsRoutes = new Hono<{ Bindings: Env }>()
   .patch("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
-  const [row] = await db.select().from(bills).where(eq(bills.id, id));
+  const [row] = await db.select().from(bills).where(and(eq(bills.id, id), eq(bills.userId, c.get("user").id)));
   if (!row) {
     return c.text("not found", 404);
   }
@@ -102,18 +104,18 @@ export const billsRoutes = new Hono<{ Bindings: Env }>()
     updates.nextDueDate = body.nextDueDate;
   }
 
-  await db.update(bills).set(updates).where(eq(bills.id, id));
-  const [updated] = await db.select().from(bills).where(eq(bills.id, id));
+  await db.update(bills).set(updates).where(and(eq(bills.id, id), eq(bills.userId, c.get("user").id)));
+  const [updated] = await db.select().from(bills).where(and(eq(bills.id, id), eq(bills.userId, c.get("user").id)));
   return c.json(updated);
   })
   .delete("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
-  const [row] = await db.select().from(bills).where(eq(bills.id, id));
+  const [row] = await db.select().from(bills).where(and(eq(bills.id, id), eq(bills.userId, c.get("user").id)));
   if (!row) {
     return c.text("not found", 404);
   }
 
-  await db.delete(bills).where(eq(bills.id, id));
+  await db.delete(bills).where(and(eq(bills.id, id), eq(bills.userId, c.get("user").id)));
     return c.body(null, 204);
   });
