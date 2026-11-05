@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { loadConfig, type ConfigEnv } from "../config";
 import { authIdentities, users } from "../db/schema";
 import { randomNonce, signState, verifyState } from "../oauthState";
-import { createSession } from "../services/sessionStore";
+import { createSession, deleteSession } from "../services/sessionStore";
 
 type Env = ConfigEnv & { DB: D1Database };
 const NONCE_COOKIE_NAME = "google_oauth_nonce";
@@ -107,4 +107,14 @@ export const authGoogleRoutes = new Hono<{ Bindings: Env }>()
       return toFrontend("/login?error=login_failed");
     }
     return toFrontend("");
+  })
+  .post("/logout", async (c) => {
+    const token = getCookie(c, "session");
+    if (token) {
+      await deleteSession(drizzle(c.env.DB), token);
+    }
+    setCookie(c, "session", "", {
+      httpOnly: true, secure: true, sameSite: "None", path: "/", maxAge: 0,
+    });
+    return c.body(null, 204);
   });

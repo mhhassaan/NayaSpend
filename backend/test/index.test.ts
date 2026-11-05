@@ -252,6 +252,51 @@ describe("queue handler", () => {
 });
 
 describe("app routing", () => {
+  test("[Review Focus] an unauthenticated request to a previously-open route now gets 401", async () => {
+    const res = await worker.fetch(new Request("https://example.com/transactions"), testEnv);
+    expect(res.status).toBe(401);
+  });
+
+  test("the global gate protects paths without their own route middleware", async () => {
+    for (const path of ["/future-route", "/auth/google/login/extra", "/auth/google/callback/extra", "/auth/gmail/callback/extra"]) {
+      expect((await worker.fetch(new Request(`https://example.com${path}`), testEnv)).status).toBe(401);
+    }
+    expect((await worker.fetch(new Request("https://example.com/future-route", { headers: { Cookie: cookie } }), testEnv)).status).toBe(404);
+  });
+
+  test.each(["/auth/google/login", "/auth/google/callback", "/auth/gmail/callback"])("%s remains reachable without a session", async (path) => {
+    const res = await worker.fetch(new Request(`https://example.com${path}`), testEnv);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBeTruthy();
+  });
+
+  test("POST /auth/google/logout deletes the session and rejects subsequent requests using the same cookie", async () => {
+    const before = await worker.fetch(new Request("https://example.com/transactions", { headers: { Cookie: cookie } }), testEnv);
+    expect(before.status).toBe(200);
+    const res = await worker.fetch(new Request("https://example.com/auth/google/logout", { method: "POST", headers: { Cookie: cookie } }), testEnv);
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe("");
+    expect(res.headers.has("Location")).toBe(false);
+    const clearedCookie = res.headers.get("Set-Cookie");
+    for (const flag of ["session=;", "Max-Age=0", "HttpOnly", "Secure", "SameSite=None", "Path=/"]) expect(clearedCookie).toContain(flag);
+    expect((await worker.fetch(new Request("https://example.com/transactions", { headers: { Cookie: cookie } }), testEnv)).status).toBe(401);
+  });
+
+  test("POST /auth/google/logout with no session cookie gets 401 from the global gate", async () => {
+    expect((await worker.fetch(new Request("https://example.com/auth/google/logout", { method: "POST" }), testEnv)).status).toBe(401);
+  });
+
+  test("CORS preflight permits credentials for the configured frontend without a session", async () => {
+    const requestEnv = { ...testEnv, FRONTEND_BASE_URL: "https://other-frontend.example.com" };
+    const res = await worker.fetch(new Request("https://example.com/transactions", {
+      method: "OPTIONS",
+      headers: { Origin: requestEnv.FRONTEND_BASE_URL, "Access-Control-Request-Method": "GET" },
+    }), requestEnv);
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(requestEnv.FRONTEND_BASE_URL);
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
   test("the real app (not just the standalone route instances) serves /transactions and /missed-transactions", async () => {
     const listRes = await worker.fetch(new Request("https://example.com/transactions", { headers: { Cookie: cookie } }), testEnv);
     expect(listRes.status).toBe(200);

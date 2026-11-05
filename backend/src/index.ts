@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { requireAuth } from "./middleware/auth";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { bills, budgets, captureRuns, gmailCredentials } from "./db/schema";
@@ -27,12 +29,21 @@ type Env = ConfigEnv & {
 const CAPTURE_CRON = "0 * * * *";
 const WATCHDOG_CRON = "30 * * * *";
 
+const globalAuthGate: typeof requireAuth = (c, next) => {
+  if (["/auth/google/login", "/auth/google/callback", "/auth/gmail/callback"].includes(c.req.path)) {
+    return next();
+  }
+  return requireAuth(c, next);
+};
+
 // Chained (not separate statements) so `typeof app` carries every route's
 // merged type -- each `.route()` call returns a new, more-specifically
 // typed instance rather than mutating `app` in place. Separate statements
 // would leave AppType reflecting only the instance before any route was
 // attached, and hc<AppType>() would silently infer no routes at all.
 const app = new Hono<{ Bindings: Env }>()
+  .use("*", cors({ origin: (_origin, c) => c.env.FRONTEND_BASE_URL, credentials: true }))
+  .use("*", globalAuthGate)
   .route("/transactions", transactionsRoutes)
   .route("/missed-transactions", missedTransactionsRoutes)
   .route("/budgets", budgetsRoutes)
