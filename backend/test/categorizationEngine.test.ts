@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, test } from "vitest";
+import { seedUserAndSession } from "./helpers/authedRequest";
 import { categoryRules } from "../src/db/schema";
 import { categorize, classifyByKeyword, correctCategory } from "../src/services/categorizationEngine";
 
@@ -23,16 +24,18 @@ describe("categorizationEngine", () => {
     ["outgoing fund transfer to jazz cafe", "Transfers"],
   ])("categorize classifies %s as %s without a stored rule", async (vendor, category) => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     expect(classifyByKeyword(vendor)).toBe(category);
-    expect(await categorize(db, vendor)).toBe(category);
+    expect(await categorize(db, vendor, userId)).toBe(category);
   });
 
   test("an exact manual rule wins over a keyword match, including Uncategorized", async () => {
     const db = drizzle(env.DB);
-    await correctCategory(db, "kfc lahore", "Work meals");
-    expect(await categorize(db, "kfc lahore")).toBe("Work meals");
-    await correctCategory(db, "kfc lahore", "Uncategorized");
-    expect(await categorize(db, "kfc lahore")).toBe("Uncategorized");
+    const { userId } = await seedUserAndSession(db);
+    await correctCategory(db, "kfc lahore", "Work meals", userId);
+    expect(await categorize(db, "kfc lahore", userId)).toBe("Work meals");
+    await correctCategory(db, "kfc lahore", "Uncategorized", userId);
+    expect(await categorize(db, "kfc lahore", userId)).toBe("Uncategorized");
   });
 
   test("classifyByKeyword returns null for unknown vendors and embedded keywords", () => {
@@ -43,27 +46,40 @@ describe("categorizationEngine", () => {
 
   test("categorize returns the matched rule's category", async () => {
     const db = drizzle(env.DB);
-    await db.insert(categoryRules).values({ vendorNormalized: "starbucks", category: "Coffee" });
-    expect(await categorize(db, "starbucks")).toBe("Coffee");
+    const { userId } = await seedUserAndSession(db);
+    await db.insert(categoryRules).values({ userId, vendorNormalized: "starbucks", category: "Coffee" });
+    expect(await categorize(db, "starbucks", userId)).toBe("Coffee");
   });
 
   test("categorize falls back to Uncategorized for an unknown vendor", async () => {
     const db = drizzle(env.DB);
-    expect(await categorize(db, "some-new-vendor")).toBe("Uncategorized");
+    const { userId } = await seedUserAndSession(db);
+    expect(await categorize(db, "some-new-vendor", userId)).toBe("Uncategorized");
   });
 
   test("categorize is case/whitespace insensitive on the stored normalized vendor", async () => {
     const db = drizzle(env.DB);
-    await db.insert(categoryRules).values({ vendorNormalized: "starbucks2", category: "Coffee" });
-    expect(await categorize(db, "  Starbucks2 ")).toBe("Coffee");
+    const { userId } = await seedUserAndSession(db);
+    await db.insert(categoryRules).values({ userId, vendorNormalized: "starbucks2", category: "Coffee" });
+    expect(await categorize(db, "  Starbucks2 ", userId)).toBe("Coffee");
   });
 
   test("correctCategory upserts the rule so the next lookup uses the correction", async () => {
     const db = drizzle(env.DB);
-    await correctCategory(db, "newvendor", "Groceries");
-    expect(await categorize(db, "newvendor")).toBe("Groceries");
+    const { userId } = await seedUserAndSession(db);
+    await correctCategory(db, "newvendor", "Groceries", userId);
+    expect(await categorize(db, "newvendor", userId)).toBe("Groceries");
 
-    await correctCategory(db, "newvendor", "Dining");
-    expect(await categorize(db, "newvendor")).toBe("Dining");
+    await correctCategory(db, "newvendor", "Dining", userId);
+    expect(await categorize(db, "newvendor", userId)).toBe("Dining");
   });
+});
+
+test("[Review Focus] a category correction made by one user is invisible to another user's categorize call for the identical vendor string", async () => {
+  const db = drizzle(env.DB);
+  const a = await seedUserAndSession(db);
+  const b = await seedUserAndSession(db);
+  await correctCategory(db, "shared-vendor", "User A's category", a.userId);
+  expect(await categorize(db, "shared-vendor", a.userId)).toBe("User A's category");
+  expect(await categorize(db, "shared-vendor", b.userId)).toBe("Uncategorized");
 });

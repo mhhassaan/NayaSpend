@@ -104,9 +104,14 @@ export const gmailCredentials = sqliteTable("gmail_credentials", {
 export const categoryRules = sqliteTable("category_rules", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull().references(() => users.id),
-  vendorNormalized: text("vendor_normalized").notNull().unique(),
+  // Not globally unique -- two different users saving a correction for
+  // the same vendor string (e.g. both shopping at "Starbucks") must not
+  // collide. Uniqueness is per (userId, vendorNormalized) instead.
+  vendorNormalized: text("vendor_normalized").notNull(),
   category: text("category").notNull(),
-});
+}, (table) => ({
+  vendorPerUserUnique: unique().on(table.userId, table.vendorNormalized),
+}));
 
 export const budgets = sqliteTable("budgets", {
   id: integer("id").primaryKey({ autoIncrement: true }),

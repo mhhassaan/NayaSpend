@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS `category_rules_vendor_normalized_unique`;--> statement-breakpoint
+CREATE UNIQUE INDEX `category_rules_user_id_vendor_normalized_unique` ON `category_rules` (`user_id`,`vendor_normalized`);

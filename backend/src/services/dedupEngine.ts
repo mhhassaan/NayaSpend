@@ -47,6 +47,7 @@ export async function runDedupCheck(
     .from(transactions)
     .where(
       and(
+        eq(transactions.userId, subject.userId),
         eq(transactions.source, otherSource),
         eq(transactions.reviewStatus, "committed"),
         eq(transactions.amount, subject.amount),

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { transactions } from "../src/db/schema";
 import { runDedupCheck } from "../src/services/dedupEngine";
+import { seedUserAndSession } from "./helpers/authedRequest";
 import { diceCoefficient } from "../src/utils/stringSimilarity";
 
 describe("diceCoefficient", () => {
@@ -29,9 +30,11 @@ describe("diceCoefficient", () => {
 describe("runDedupCheck", () => {
   test("flags a true cross-channel duplicate (same date, same amount, similar vendor)", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     const [emailTx] = await db
       .insert(transactions)
       .values({
+        userId,
         amount: 125000,
         date: "2026-10-27",
         vendorRaw: "STARBUCKS #4521",
@@ -45,6 +48,7 @@ describe("runDedupCheck", () => {
     const [stmtTx] = await db
       .insert(transactions)
       .values({
+        userId,
         amount: 125000,
         date: "2026-10-27",
         vendorRaw: "Starbucks Coffee",
@@ -69,7 +73,9 @@ describe("runDedupCheck", () => {
 
   test("does NOT flag a same-day, same-amount, unrelated vendor as a duplicate", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     await db.insert(transactions).values({
+      userId,
       amount: 125000,
       date: "2026-10-27",
       vendorRaw: "Starbucks",
@@ -82,6 +88,7 @@ describe("runDedupCheck", () => {
     const [stmtTx] = await db
       .insert(transactions)
       .values({
+        userId,
         amount: 125000,
         date: "2026-10-27",
         vendorRaw: "Electric Company",
@@ -100,7 +107,9 @@ describe("runDedupCheck", () => {
 
   test("does NOT flag the same vendor/amount outside the date-proximity window", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     await db.insert(transactions).values({
+      userId,
       amount: 125000,
       date: "2026-10-01",
       vendorRaw: "Starbucks",
@@ -113,6 +122,7 @@ describe("runDedupCheck", () => {
     const [stmtTx] = await db
       .insert(transactions)
       .values({
+        userId,
         amount: 125000,
         date: "2026-10-27",
         vendorRaw: "Starbucks",
@@ -131,7 +141,9 @@ describe("runDedupCheck", () => {
 
   test("never compares against pending_review rows", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     await db.insert(transactions).values({
+      userId,
       amount: 125000,
       date: "2026-10-27",
       vendorRaw: "Starbucks",
@@ -144,6 +156,7 @@ describe("runDedupCheck", () => {
     const [stmtTx] = await db
       .insert(transactions)
       .values({
+        userId,
         amount: 125000,
         date: "2026-10-27",
         vendorRaw: "Starbucks",
@@ -162,7 +175,9 @@ describe("runDedupCheck", () => {
 
   test("a manual_missed transaction is never compared against anything", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     await db.insert(transactions).values({
+      userId,
       amount: 125000,
       date: "2026-10-27",
       vendorRaw: "Starbucks",
@@ -175,6 +190,7 @@ describe("runDedupCheck", () => {
     const [manualTx] = await db
       .insert(transactions)
       .values({
+        userId,
         amount: 125000,
         date: "2026-10-27",
         vendorRaw: "Starbucks",
@@ -193,7 +209,9 @@ describe("runDedupCheck", () => {
 
   test("does not match a different amount even with an identical vendor and date", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     await db.insert(transactions).values({
+      userId,
       amount: 125000,
       date: "2026-10-27",
       vendorRaw: "Starbucks",
@@ -206,6 +224,7 @@ describe("runDedupCheck", () => {
     const [stmtTx] = await db
       .insert(transactions)
       .values({
+        userId,
         amount: 99999,
         date: "2026-10-27",
         vendorRaw: "Starbucks",
@@ -224,26 +243,27 @@ describe("runDedupCheck", () => {
 
   test("[C1] two consecutive-day same-price purchases do not corrupt each other's dedup groups", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     // G1/S1 on the 27th, G2/S2 on the 28th -- all same amount/vendor, so
     // naive matching could cross-wire G1 with S2 (both within the ±3-day
     // window of each other) instead of G1<->S1 and G2<->S2.
     const [g1] = await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" })
       .returning();
     const [g2] = await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-28", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-28", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" })
       .returning();
     const [s1] = await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
       .returning();
 
     await runDedupCheck(db, s1.id);
     const [s2] = await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-28", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-28", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
       .returning();
     await runDedupCheck(db, s2.id);
 
@@ -259,13 +279,14 @@ describe("runDedupCheck", () => {
 
   test("[C1] a candidate already in a dedup group is never pulled into a second group", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     const [g1] = await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" })
       .returning();
     const [s1] = await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
       .returning();
     await runDedupCheck(db, s1.id);
     const [g1AfterFirstMatch] = await db.select().from(transactions).where(eq(transactions.id, g1.id));
@@ -276,7 +297,7 @@ describe("runDedupCheck", () => {
     // it must not be regrouped with s2.
     const [s2] = await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
       .returning();
     const result = await runDedupCheck(db, s2.id);
 
@@ -287,13 +308,14 @@ describe("runDedupCheck", () => {
 
   test("[C1] a transaction that already has a dedup group is not re-matched when checked again", async () => {
     const db = drizzle(env.DB);
+    const { userId } = await seedUserAndSession(db);
     await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "gmail_email", provenance: "{}", reviewStatus: "committed" })
       .returning();
     const [s1] = await db
       .insert(transactions)
-      .values({ amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
+      .values({ userId, amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", category: "Coffee", source: "statement_import", provenance: "{}", reviewStatus: "committed" })
       .returning();
     await runDedupCheck(db, s1.id);
 
@@ -306,4 +328,17 @@ describe("runDedupCheck", () => {
     const [s1After] = await db.select().from(transactions).where(eq(transactions.id, s1.id));
     expect(s1After.dedupResolution).toBe("kept"); // user's resolution preserved
   });
+});
+
+test("[Review Focus] a candidate from a different user is never matched, even with identical date/amount/vendor", async () => {
+  const db = drizzle(env.DB);
+  const a = await seedUserAndSession(db);
+  const b = await seedUserAndSession(db);
+  const values = { amount: 125000, date: "2026-10-27", vendorRaw: "Starbucks", vendorNormalized: "starbucks", provenance: "{}", reviewStatus: "committed" };
+  const [subject] = await db.insert(transactions).values({ ...values, userId: a.userId, source: "gmail_email" }).returning();
+  const [candidate] = await db.insert(transactions).values({ ...values, userId: b.userId, source: "statement_import" }).returning();
+  expect(await runDedupCheck(db, subject.id)).toEqual({ matched: false, dedupGroupId: null });
+  for (const row of [subject, candidate]) {
+    expect(await db.select().from(transactions).where(eq(transactions.id, row.id))).toEqual([row]);
+  }
 });

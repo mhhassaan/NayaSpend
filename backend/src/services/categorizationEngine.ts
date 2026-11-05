@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { categoryRules } from "../db/schema";
 
@@ -25,13 +25,14 @@ export function normalize(vendor: string): string {
 
 export async function categorize(
   db: DrizzleD1Database,
-  vendorNormalized: string
+  vendorNormalized: string,
+  userId: number
 ): Promise<string> {
   const normalized = normalize(vendorNormalized);
   const [rule] = await db
     .select()
     .from(categoryRules)
-    .where(eq(categoryRules.vendorNormalized, normalized));
+    .where(and(eq(categoryRules.userId, userId), eq(categoryRules.vendorNormalized, normalized)));
 
   return rule?.category ?? classifyByKeyword(normalized) ?? UNCATEGORIZED;
 }
@@ -39,20 +40,21 @@ export async function categorize(
 export async function correctCategory(
   db: DrizzleD1Database,
   vendorNormalized: string,
-  category: string
+  category: string,
+  userId: number
 ): Promise<void> {
   const normalized = normalize(vendorNormalized);
   const [existing] = await db
     .select()
     .from(categoryRules)
-    .where(eq(categoryRules.vendorNormalized, normalized));
+    .where(and(eq(categoryRules.userId, userId), eq(categoryRules.vendorNormalized, normalized)));
 
   if (existing) {
     await db
       .update(categoryRules)
       .set({ category })
-      .where(eq(categoryRules.vendorNormalized, normalized));
+      .where(and(eq(categoryRules.userId, userId), eq(categoryRules.vendorNormalized, normalized)));
   } else {
-    await db.insert(categoryRules).values({ vendorNormalized: normalized, category });
+    await db.insert(categoryRules).values({ userId, vendorNormalized: normalized, category });
   }
 }
