@@ -16,9 +16,10 @@ const TOKEN_EXPIRY_SKEW_MS = 5 * 60 * 1000; // refresh a few minutes before Goog
  */
 export async function getGmailClient(
   db: DrizzleD1Database,
-  env: Partial<ConfigEnv>
+  env: Partial<ConfigEnv>,
+  userId: number
 ): Promise<GmailClient | null> {
-  const [credentials] = await db.select().from(gmailCredentials);
+  const [credentials] = await db.select().from(gmailCredentials).where(eq(gmailCredentials.userId, userId));
   if (!credentials) return null;
 
   const config = loadConfig(env);

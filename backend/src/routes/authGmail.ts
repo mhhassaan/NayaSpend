@@ -5,6 +5,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { loadConfig } from "../config";
 import { gmailCredentials } from "../db/schema";
 import { decryptToken, encryptToken } from "../security";
+import { requireAuth, type AuthUser } from "../middleware/auth";
+import { validateSession } from "../services/sessionStore";
 import { randomNonce, signState, verifyState } from "../oauthState";
 
 type Env = {
@@ -32,7 +34,7 @@ function consentUrl(clientId: string, redirectUri: string, state: string): strin
   return url.toString();
 }
 
-async function redirectToConsent(c: Context<{ Bindings: Env }>) {
+async function redirectToConsent(c: Context<{ Bindings: Env; Variables: { user: AuthUser } }>) {
   const config = loadConfig(c.env);
   const nonce = randomNonce();
   const state = await signState(Date.now(), nonce, config.tokenEncryptionKey);
@@ -56,16 +58,16 @@ async function redirectToConsent(c: Context<{ Bindings: Env }>) {
 // the SPA's CaptureHealth page instead of returning a bare Worker
 // response, so the reconnect round trip (CaptureHealth -> Google -> back)
 // always lands the user back inside the app.
-function redirectToFrontend(c: Context<{ Bindings: Env }>, frontendBaseUrl: string, path: string) {
+function redirectToFrontend(c: Context<{ Bindings: Env; Variables: { user: AuthUser } }>, frontendBaseUrl: string, path: string) {
   c.header("Location", `${frontendBaseUrl}${path}`);
   return c.body(null, 302);
 }
 
 // [Phase 8 Task 5] Chained so `typeof authGmailRoutes` carries every
 // route's schema -- see the identical fix/explanation in index.ts.
-export const authGmailRoutes = new Hono<{ Bindings: Env }>()
-  .get("/connect", (c) => redirectToConsent(c))
-  .get("/reconnect", (c) => redirectToConsent(c))
+export const authGmailRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
+  .get("/connect", requireAuth, (c) => redirectToConsent(c))
+  .get("/reconnect", requireAuth, (c) => redirectToConsent(c))
   .get("/callback", async (c) => {
   const config = loadConfig(c.env);
   const toFrontend = (path: string) => redirectToFrontend(c, config.frontendBaseUrl, path);
@@ -75,6 +77,13 @@ export const authGmailRoutes = new Hono<{ Bindings: Env }>()
   if (!state || !(await verifyState(state, cookieNonce, config.tokenEncryptionKey))) {
     return toFrontend("/capture-health?error=invalid_state");
   }
+
+  const sessionToken = getCookie(c, "session");
+  const user = sessionToken ? await validateSession(drizzle(c.env.DB), sessionToken) : null;
+  if (!user) {
+    return toFrontend("/capture-health?error=not_authenticated");
+  }
+  const userId = user.id;
 
   const code = c.req.query("code");
   if (!code) {
@@ -115,7 +124,7 @@ export const authGmailRoutes = new Hono<{ Bindings: Env }>()
   }
 
   const db = drizzle(c.env.DB);
-  const [existing] = await db.select().from(gmailCredentials);
+  const [existing] = await db.select().from(gmailCredentials).where(eq(gmailCredentials.userId, userId));
 
   // Google omits refresh_token on some reconnects (it only issues a new
   // one when the user re-consents) -- keep the existing one rather than
@@ -139,7 +148,7 @@ export const authGmailRoutes = new Hono<{ Bindings: Env }>()
       .set({ encryptedAccessToken, encryptedRefreshToken, expiresAt })
       .where(eq(gmailCredentials.id, existing.id));
   } else {
-    await db.insert(gmailCredentials).values({ encryptedAccessToken, encryptedRefreshToken, expiresAt });
+    await db.insert(gmailCredentials).values({ userId, encryptedAccessToken, encryptedRefreshToken, expiresAt });
   }
 
   return toFrontend("/capture-health?connected=1");

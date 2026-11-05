@@ -1,8 +1,9 @@
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { authGmailRoutes } from "../src/routes/authGmail";
-import { gmailCredentials } from "../src/db/schema";
+import { gmailCredentials, users } from "../src/db/schema";
+import { createSession } from "../src/services/sessionStore";
 import { decryptToken } from "../src/security";
 
 // The real worker env has no Gmail/OAuth secrets bound in this test
@@ -19,6 +20,9 @@ const testEnv = {
   FRONTEND_BASE_URL: "https://frontend.example.com",
 };
 
+let sessionCookie: string;
+let userId: number;
+
 function cookieHeaderFrom(connectRes: Response): string {
   // Hono test requests don't carry a cookie jar across calls like a real
   // browser -- extract the Set-Cookie's name=value pair and forward it
@@ -32,18 +36,56 @@ function cookieHeaderFrom(connectRes: Response): string {
 // the state/nonce check itself thread a real one through so they keep
 // testing what they originally tested.
 async function freshFlow(): Promise<{ state: string; cookie: string }> {
-  const res = await authGmailRoutes.request("/connect", {}, testEnv);
+  const res = await authGmailRoutes.request("/connect", { headers: { Cookie: sessionCookie } }, testEnv);
   const state = new URL(res.headers.get("Location")!).searchParams.get("state")!;
   return { state, cookie: cookieHeaderFrom(res) };
 }
 
 function callback(query: string, cookie?: string) {
-  return authGmailRoutes.request(`/callback?${query}`, cookie ? { headers: { Cookie: cookie } } : {}, testEnv);
+  return authGmailRoutes.request(`/callback?${query}`, { headers: { Cookie: cookie ? `${sessionCookie}; ${cookie}` : sessionCookie } }, testEnv);
 }
 
 describe("authGmail routes", () => {
-  test("GET /connect redirects to Google's OAuth consent screen with gmail.readonly scope", async () => {
+  beforeEach(async () => {
+    const db = drizzle(env.DB);
+    const [user] = await db.insert(users).values({ email: "a@example.com", displayName: "A", createdAt: new Date().toISOString() }).returning();
+    userId = user.id;
+    const { token } = await createSession(db, user.id);
+    sessionCookie = `session=${token}`;
+  });
+
+  test("[Review Focus] /connect requires a session, rejecting an unauthenticated request", async () => {
     const res = await authGmailRoutes.request("/connect", {}, testEnv);
+    expect(res.status).toBe(401);
+  });
+
+  test("[Review Focus] /reconnect requires a session, rejecting an unauthenticated request", async () => {
+    const res = await authGmailRoutes.request("/reconnect", {}, testEnv);
+    expect(res.status).toBe(401);
+  });
+
+  test("/callback without a valid session redirects to capture-health with an error, before any token exchange", async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { state, cookie } = await freshFlow();
+    const nonceCookie = cookie.split("; ").find((part) => part.startsWith("gmail_oauth_nonce="))!;
+    const res = await authGmailRoutes.request(`/callback?code=fake-code&state=${encodeURIComponent(state)}`, { headers: { Cookie: nonceCookie } }, testEnv);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?error=not_authenticated");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("a successful callback stores the credentials scoped to the authenticated user", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ access_token: "a", refresh_token: "r", expires_in: 3600 }), { status: 200 })));
+    const { state, cookie } = await freshFlow();
+    const res = await callback(`code=good-code&state=${encodeURIComponent(state)}`, cookie);
+    expect(res.headers.get("Location")).toBe("https://frontend.example.com/capture-health?connected=1");
+    const [row] = await drizzle(env.DB).select().from(gmailCredentials);
+    expect(row.userId).toBe(userId);
+  });
+
+  test("GET /connect redirects to Google's OAuth consent screen with gmail.readonly scope", async () => {
+    const res = await authGmailRoutes.request("/connect", { headers: { Cookie: sessionCookie } }, testEnv);
     expect(res.status).toBe(302);
     const location = res.headers.get("Location")!;
     expect(location).toContain("accounts.google.com");
@@ -53,25 +95,25 @@ describe("authGmail routes", () => {
   });
 
   test("GET /reconnect redirects the same way as /connect", async () => {
-    const res = await authGmailRoutes.request("/reconnect", {}, testEnv);
+    const res = await authGmailRoutes.request("/reconnect", { headers: { Cookie: sessionCookie } }, testEnv);
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("accounts.google.com");
   });
 
   test("GET /connect includes a state parameter in the consent URL", async () => {
-    const res = await authGmailRoutes.request("/connect", {}, testEnv);
+    const res = await authGmailRoutes.request("/connect", { headers: { Cookie: sessionCookie } }, testEnv);
     const location = new URL(res.headers.get("Location")!);
     expect(location.searchParams.get("state")).toBeTruthy();
   });
 
-  // [Final review I2] /connect is public and unauthenticated, so an HMAC
+  // [Final review I2] An HMAC
   // over just a timestamp proves only "this server issued it recently" --
   // not "this browser started the flow". Without a browser-bound nonce, an
   // attacker can run /connect themselves, consent with their own Google
   // account, and hand the victim (or the API) a fully valid state+code
   // pair that replaces the victim's Gmail connection with the attacker's.
   test("[I2] GET /connect sets an HttpOnly nonce cookie alongside the state parameter", async () => {
-    const res = await authGmailRoutes.request("/connect", {}, testEnv);
+    const res = await authGmailRoutes.request("/connect", { headers: { Cookie: sessionCookie } }, testEnv);
     const setCookie = res.headers.get("Set-Cookie");
     expect(setCookie).toBeTruthy();
     expect(setCookie).toContain("HttpOnly");
