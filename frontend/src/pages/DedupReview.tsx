@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import { Button, Card, EmptyState, showError, showSuccess } from "../components";
+import { Button, Card, EmptyState, ListReveal, showError, showSuccess } from "../components";
 import type { Transaction } from "../types/transaction";
 import { formatCents } from "../utils/money";
 import { maskAccountNumbers } from "../utils/mask";
@@ -136,7 +136,7 @@ export function DedupReview() {
         </Button>
       </div>
 
-      {pairs.map(([a, b]) => (
+      <ListReveal className="contents" items={pairs.map(([a, b]) => (
         <div key={a.dedupGroupId} className="flex flex-col gap-2 rounded-xl border border-mid-grey p-3">
           <label className="flex items-center gap-2 text-[13px] text-text-secondary">
             <input
@@ -174,7 +174,7 @@ export function DedupReview() {
             Confirm distinct
           </button>
         </div>
-      ))}
+      ))} />
     </div>
   );
 }

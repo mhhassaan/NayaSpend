@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import { Button, Card, EmptyState, Modal, StatDisplay, showError, showSuccess } from "../components";
+import { Button, Card, EmptyState, ListReveal, Modal, StatDisplay, showError, showSuccess } from "../components";
 import type { Budget } from "../types/transaction";
 import { formatCents, parseRupeesToCents } from "../utils/money";
 
@@ -280,11 +280,9 @@ export function Budgets() {
       {budgetsList.length === 0 ? (
         <EmptyState message="No budgets yet." />
       ) : (
-        <div className="flex flex-col gap-3">
-          {budgetsList.map((b) => (
+        <ListReveal items={budgetsList.map((b) => (
             <BudgetRow key={b.id} budget={b} trends={trends} />
-          ))}
-        </div>
+          ))} />
       )}
     </div>
   );

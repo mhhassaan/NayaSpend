@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import { Button, Card, EmptyState, Modal, Pill, showError, showSuccess } from "../components";
+import { Button, Card, EmptyState, ListReveal, Modal, Pill, showError, showSuccess } from "../components";
 import type { Bill } from "../types/transaction";
 import { formatCents, parseRupeesToCents } from "../utils/money";
 
@@ -306,11 +306,9 @@ export function Bills() {
       {billsList.length === 0 ? (
         <EmptyState message="No bills yet." />
       ) : (
-        <div className="flex flex-col gap-3">
-          {billsList.map((b) => (
+        <ListReveal items={billsList.map((b) => (
             <BillRow key={b.id} bill={b} />
-          ))}
-        </div>
+          ))} />
       )}
     </div>
   );

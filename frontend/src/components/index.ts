@@ -9,3 +9,4 @@ export { Modal } from "./Modal";
 export { ToastProvider, showSuccess, showError } from "./ToastProvider";
 export { AppShell } from "./AppShell";
 export { PageTransition } from "./PageTransition";
+export { ListReveal } from "./ListReveal";

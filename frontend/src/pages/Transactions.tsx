@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import { StatementUploadIcon } from "../components/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import { Card, EmptyState, Modal, Pill, showError, showSuccess } from "../components";
+import { Card, EmptyState, ListReveal, Modal, Pill, showError, showSuccess } from "../components";
 import type { Transaction } from "../types/transaction";
 import { formatCents, parseRupeesToCents } from "../utils/money";
 import { maskAccountNumbers } from "../utils/mask";
@@ -317,11 +317,9 @@ export function Transactions() {
   return (
     <div className="flex flex-col gap-4">
       {header}
-      <div className="flex flex-col gap-3">
-        {transactions.map((t) => (
+      <ListReveal items={transactions.map((t) => (
           <TransactionRow key={t.id} transaction={t} />
-        ))}
-      </div>
+        ))} />
     </div>
   );
 }
