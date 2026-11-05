@@ -12,7 +12,7 @@ describe("logMissedTransaction", () => {
     const [row] = await db.select().from(transactions);
     expect(row.source).toBe("manual_missed");
     expect(row.reviewStatus).toBe("committed");
-    expect(row.amount).toBe(50000);
+    expect(row.amount).toBe(-50000);
     expect(row.date).toBe("2026-10-27");
     expect(row.vendorNormalized).toBe("corner store");
     expect(row.provenance).toBe("{}");

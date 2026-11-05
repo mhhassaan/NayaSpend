@@ -13,7 +13,8 @@ vi.mock("../components", async (importOriginal) => {
 function trendsResponse() {
   return {
     month: new Date().toISOString().slice(0, 7),
-    totalCents: 8000,
+    spentCents: 8000,
+    receivedCents: 0,
     byCategory: [{ category: "Coffee", totalCents: 8000 }],
     hasData: true,
   };
@@ -79,7 +80,7 @@ describe("Budgets", () => {
       { test: urlContains("/api/budgets", "GET"), respond: () => jsonResponse([{ id: 1, category: "Coffee", limitAmount: 10000, periodType: "monthly", lastAlertedThreshold: null, lastAlertedPeriodStart: null }]) },
       {
         test: urlContains("/api/trends", "GET"),
-        respond: () => jsonResponse({ month: new Date().toISOString().slice(0, 7), totalCents: 14200, byCategory: [{ category: "Coffee", totalCents: 14200 }], hasData: true }),
+        respond: () => jsonResponse({ month: new Date().toISOString().slice(0, 7), spentCents: 14200, receivedCents: 0, byCategory: [{ category: "Coffee", totalCents: 14200 }], hasData: true }),
       },
     ]);
     renderWithProviders(<Budgets />);

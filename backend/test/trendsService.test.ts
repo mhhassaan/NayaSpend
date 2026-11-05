@@ -6,7 +6,7 @@ import { transactions } from "../src/db/schema";
 
 async function seed(db: ReturnType<typeof drizzle>, overrides: Partial<typeof transactions.$inferInsert> = {}) {
   await db.insert(transactions).values({
-    amount: 5000,
+    amount: -5000,
     date: "2026-10-15",
     vendorRaw: "x",
     vendorNormalized: "x",
@@ -21,17 +21,40 @@ async function seed(db: ReturnType<typeof drizzle>, overrides: Partial<typeof tr
 describe("getMonthlyTrends", () => {
   test("sums committed transactions by category for the given month", async () => {
     const db = drizzle(env.DB);
-    await seed(db, { amount: 5000, category: "Coffee" });
-    await seed(db, { amount: 3000, category: "Coffee" });
-    await seed(db, { amount: 2000, category: "Groceries" });
+    await seed(db, { amount: -5000, category: "Coffee" });
+    await seed(db, { amount: -3000, category: "Coffee" });
+    await seed(db, { amount: -2000, category: "Groceries" });
 
     const result = await getMonthlyTrends(db, "2026-10");
 
-    expect(result.totalCents).toBe(10000);
+    expect(result.spentCents).toBe(10000);
+    expect(result.receivedCents).toBe(0);
     expect(result.hasData).toBe(true);
     expect(result.byCategory).toEqual(
       expect.arrayContaining([{ category: "Coffee", totalCents: 8000 }, { category: "Groceries", totalCents: 2000 }])
     );
+  });
+
+  test("separates spend and received money within the same category", async () => {
+    const db = drizzle(env.DB);
+    await seed(db, { amount: -5000, category: "Transfers" });
+    await seed(db, { amount: 12000, category: "Transfers" });
+    await seed(db, { amount: 3000, category: "Salary" });
+    const result = await getMonthlyTrends(db, "2026-10");
+    expect(result.spentCents).toBe(5000);
+    expect(result.receivedCents).toBe(15000);
+    expect(result.hasData).toBe(true);
+    expect(result.byCategory).toEqual([{ category: "Transfers", totalCents: 5000 }]);
+  });
+
+  test("an income-only month has no spend data but retains received money", async () => {
+    const db = drizzle(env.DB);
+    await seed(db, { amount: 12000, category: "Salary" });
+    const result = await getMonthlyTrends(db, "2026-10");
+    expect(result.spentCents).toBe(0);
+    expect(result.receivedCents).toBe(12000);
+    expect(result.hasData).toBe(false);
+    expect(result.byCategory).toEqual([]);
   });
 
   test("excludes a transaction outside the requested month", async () => {
@@ -41,7 +64,7 @@ describe("getMonthlyTrends", () => {
     const result = await getMonthlyTrends(db, "2026-10");
 
     expect(result.hasData).toBe(false);
-    expect(result.totalCents).toBe(0);
+    expect(result.spentCents).toBe(0);
   });
 
   test("excludes pending_review, soft-deleted, and dedup-pending transactions", async () => {
@@ -80,13 +103,17 @@ describe("getTrendsHistory", () => {
     const now = new Date();
     const thisMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
     await db.insert(transactions).values({
-      amount: 1000, date: `${thisMonth}-05`, vendorRaw: "x", vendorNormalized: "x", category: "Coffee",
+      amount: -1000, date: `${thisMonth}-05`, vendorRaw: "x", vendorNormalized: "x", category: "Coffee",
       source: "manual_missed", provenance: "{}", reviewStatus: "committed",
     });
 
+    await seed(db, { amount: 2500, date: `${thisMonth}-06` });
+
     const result = await getTrendsHistory(db, 2);
 
-    expect(result.months[1].totalCents).toBe(1000);
+    expect(result.months[1].spentCents).toBe(1000);
+    expect(result.months[1].receivedCents).toBe(2500);
+    expect(result.months[1].byCategory).toEqual([{ category: "Coffee", totalCents: 1000 }]);
     expect(result.months[1].hasData).toBe(true);
     expect(result.months[0].hasData).toBe(false);
   });

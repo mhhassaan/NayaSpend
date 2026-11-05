@@ -5,9 +5,13 @@ import { apiClient } from "../api/client";
 import { Card, EmptyState, Pill, StatDisplay, Tile, showError } from "../components";
 import { BillsIcon, BudgetsIcon, StatementUploadIcon, TransactionsIcon } from "../components/icons";
 
+import { formatCents } from "../utils/money";
+import type { Budget } from "../types/transaction";
+
 type MonthlyTrends = {
   month: string;
-  totalCents: number;
+  spentCents: number;
+  receivedCents: number;
   byCategory: { category: string; totalCents: number }[];
   hasData: boolean;
 };
@@ -22,10 +26,6 @@ function shiftMonth(month: string, delta: number): string {
   const [year, m] = month.split("-").map(Number);
   const date = new Date(Date.UTC(year, m - 1 + delta, 1));
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-function formatCents(cents: number): string {
-  return `Rs. ${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // This task's pattern, referenced (not repeated) by every later page task:
@@ -67,6 +67,16 @@ export function Dashboard() {
     },
   });
 
+  const budgetsQuery = useQuery({
+    queryKey: ["budgets"],
+    queryFn: async () => {
+      const res = await apiClient.budgets.$get();
+      if (!res.ok) throw new Error(`Failed to load budgets (${res.status})`);
+      return (await res.json()) as Budget[];
+    },
+    retry: false,
+  });
+
   useEffect(() => {
     if (monthQuery.isError) showError("Couldn't load this month's spending.");
   }, [monthQuery.isError]);
@@ -104,12 +114,42 @@ export function Dashboard() {
 
   const monthData = monthQuery.data!;
   const historyData = historyQuery.data!;
-  const maxHistoryTotal = Math.max(1, ...historyData.months.map((m) => m.totalCents));
+  const maxHistoryTotal = Math.max(1, ...historyData.months.map((m) => m.spentCents));
+
+  const selectedHistory = historyData.months.find((entry) => entry.month === month);
+  const previousMonth = shiftMonth(month, -1);
+  const previousHistory = historyData.months.find((entry) => entry.month === previousMonth);
+  const delta = monthData.hasData && selectedHistory && previousHistory && previousHistory.spentCents > 0
+    && selectedHistory.spentCents !== previousHistory.spentCents
+    ? ((selectedHistory.spentCents - previousHistory.spentCents) / previousHistory.spentCents) * 100
+    : null;
+  const previousMonthName = new Date(`${previousMonth}-01T00:00:00Z`).toLocaleString("en", { month: "short", timeZone: "UTC" });
+  const [year, monthNumber] = month.split("-").map(Number);
+  const days = month === currentMonth()
+    ? new Date().getUTCDate()
+    : new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const categories = [...monthData.byCategory].sort((a, b) => b.totalCents - a.totalCents);
+  const monthlySpentCents = monthData.spentCents;
 
   return (
     <FadeIn>
       <div className="flex flex-col gap-6">
-        <StatDisplay label={`Spend for ${monthData.month}`} value={formatCents(monthData.totalCents)} />
+        <div className="flex flex-wrap items-end gap-6">
+          <div className="flex flex-wrap items-center gap-3">
+            <StatDisplay label={`Spend for ${monthData.month}`} value={formatCents(monthlySpentCents)} />
+            {delta !== null && (
+              <Pill tone={delta > 0 ? "warning" : "success"}>
+                {`${delta > 0 ? "\u25b2" : "\u25bc"} ${Math.max(1, Math.round(Math.abs(delta)))}% vs ${previousMonthName}`}
+              </Pill>
+            )}
+          </div>
+          {monthData.hasData && monthlySpentCents > 0 && (
+            <StatDisplay label="Avg/day" value={formatCents(monthlySpentCents / days)} />
+          )}
+          {monthData.receivedCents > 0 && (
+            <StatDisplay label="Received" value={formatCents(monthData.receivedCents)} />
+          )}
+        </div>
 
         <div className="grid grid-cols-4 gap-3">
           <Tile icon={<TransactionsIcon />} label="Log transaction" onClick={() => (window.location.href = "/log-transaction")} />
@@ -133,15 +173,52 @@ export function Dashboard() {
             <EmptyState message="No spending recorded yet for this month." />
           ) : (
             <div className="flex flex-col gap-2">
-              {monthData.byCategory.map((c) => (
-                <div key={c.category} className="flex items-center justify-between">
-                  <Pill>{c.category}</Pill>
-                  <span className="font-body text-[15px] font-semibold">{formatCents(c.totalCents)}</span>
-                </div>
-              ))}
+              {categories.map((c) => {
+                const share = monthlySpentCents > 0 ? Math.max(0, Math.min(100, (c.totalCents / monthlySpentCents) * 100)) : 0;
+                return (
+                  <div key={c.category} className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <Pill>{c.category}</Pill>
+                      <span className="font-body text-[15px] font-semibold">{formatCents(c.totalCents)}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-xl bg-mid-grey">
+                      <div
+                        role="meter"
+                        aria-label={`${c.category} share of spending`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={share}
+                        className="h-full rounded-xl bg-accent"
+                        style={{ width: `${share}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </Card>
+
+        {budgetsQuery.isSuccess && budgetsQuery.data.length > 0 && (
+          <Card>
+            <section aria-label="Budgets at a glance" className="flex flex-col gap-3">
+              <h2 className="font-body text-[15px] font-semibold text-text-secondary">Budgets at a glance</h2>
+              {budgetsQuery.data.map((budget) => {
+                const spent = monthData.byCategory.find((c) => c.category === budget.category)?.totalCents ?? 0;
+                const pct = budget.limitAmount > 0 ? Math.round((spent / budget.limitAmount) * 100) : 0;
+                return (
+                  <div key={budget.id} className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-body text-[15px]">
+                      <p className="font-semibold">{budget.category}</p>
+                      <p className="text-text-secondary">{formatCents(spent)} / {formatCents(budget.limitAmount)}</p>
+                    </div>
+                    <Pill tone={pct >= 100 ? "danger" : pct >= 80 ? "warning" : "neutral"}>{pct}%</Pill>
+                  </div>
+                );
+              })}
+            </section>
+          </Card>
+        )}
 
         <Card>
           <p className="mb-3 font-body text-[15px] font-semibold text-text-secondary">Last 6 months</p>
@@ -153,7 +230,7 @@ export function Dashboard() {
                 <div key={m.month} className="flex flex-1 flex-col items-center gap-1" title={m.month}>
                   <div
                     className="w-full rounded-t-sm bg-accent"
-                    style={{ height: `${Math.max(2, (m.totalCents / maxHistoryTotal) * 100)}px` }}
+                    style={{ height: `${Math.max(2, (m.spentCents / maxHistoryTotal) * 100)}px` }}
                   />
                   <span className="font-body text-[11px] text-text-secondary">{m.month.slice(5)}</span>
                 </div>

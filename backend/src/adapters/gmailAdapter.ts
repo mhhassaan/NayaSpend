@@ -27,7 +27,7 @@ function buildCommittedRow(message: GmailMessage, category: string, parsed: {
   vendorRaw: string;
 }): TransactionInsert {
   return {
-    amount: parsed.amountCents,
+    amount: -parsed.amountCents,
     date: parsed.date,
     vendorRaw: parsed.vendorRaw,
     vendorNormalized: normalize(parsed.vendorRaw),

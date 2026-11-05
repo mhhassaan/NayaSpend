@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import { and, desc, eq, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { transactions } from "../db/schema";
-import { correctCategory, normalize } from "../services/categorizationEngine";
+import { categorize, correctCategory, normalize } from "../services/categorizationEngine";
 import { runDedupCheck } from "../services/dedupEngine";
 
 const RESOLVE_REVIEW_ACTIONS = ["commit", "reject"] as const;
@@ -35,6 +35,46 @@ type Env = {
 // explanation; the same issue exists in every route file independently,
 // since each is its own Hono instance mounted into the main app.
 export const transactionsRoutes = new Hono<{ Bindings: Env }>()
+  .post("/fix-sign-convention", async (c) => {
+    const db = drizzle(c.env.DB);
+    const result = await db
+      .update(transactions)
+      .set({ amount: sql`-${transactions.amount}` })
+      .where(and(
+        inArray(transactions.source, ["manual_missed", "gmail_email"]),
+        eq(transactions.reviewStatus, "committed"),
+        isNull(transactions.deletedAt),
+        gt(transactions.amount, 0)
+      ))
+      .run();
+
+    return c.json({ fixed: result.meta.changes });
+  })
+  .post("/recategorize", async (c) => {
+    const db = drizzle(c.env.DB);
+    const eligible = and(
+      eq(transactions.category, "Uncategorized"),
+      eq(transactions.reviewStatus, "committed"),
+      isNull(transactions.deletedAt)
+    );
+    const rows = await db.select().from(transactions).where(eligible);
+    let recategorized = 0;
+
+    for (const row of rows) {
+      const category = await categorize(db, row.vendorNormalized);
+      if (category === "Uncategorized") continue;
+
+      // Recheck eligibility so a concurrent manual correction is never overwritten.
+      const changed = await db
+        .update(transactions)
+        .set({ category })
+        .where(and(eq(transactions.id, row.id), eligible))
+        .returning({ id: transactions.id });
+      recategorized += changed.length;
+    }
+
+    return c.json({ recategorized });
+  })
   .get("/", async (c) => {
     const db = drizzle(c.env.DB);
     const reviewStatus = c.req.query("reviewStatus");

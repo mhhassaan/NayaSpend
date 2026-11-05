@@ -16,7 +16,7 @@ function currentMonthDay(day: number): string {
 
 function transactionValues(overrides: Partial<typeof transactions.$inferInsert> = {}) {
   return {
-    amount: 10000,
+    amount: -10000,
     date: currentMonthDay(15),
     vendorRaw: "x",
     vendorNormalized: "x",
@@ -40,7 +40,7 @@ describe("evaluateBudgets", () => {
   test("alerts once when spending crosses 100% of the monthly limit", async () => {
     const db = drizzle(env.DB);
     await db.insert(budgets).values({ category: "Coffee", limitAmount: 10000, periodType: "monthly" });
-    await seedTransaction(db, { amount: 10000 });
+    await seedTransaction(db, { amount: -10000 });
     const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -53,7 +53,7 @@ describe("evaluateBudgets", () => {
   test("does not re-alert on a second run within the same month at the same threshold", async () => {
     const db = drizzle(env.DB);
     await db.insert(budgets).values({ category: "Coffee", limitAmount: 10000, periodType: "monthly" });
-    await seedTransaction(db, { amount: 10000 });
+    await seedTransaction(db, { amount: -10000 });
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
     await evaluateBudgets(db, testEnv);
 
@@ -68,7 +68,7 @@ describe("evaluateBudgets", () => {
   test("[Review Focus] excludes a transaction whose dedup_resolution is pending from the spent total", async () => {
     const db = drizzle(env.DB);
     await db.insert(budgets).values({ category: "Coffee", limitAmount: 10000, periodType: "monthly" });
-    await seedTransaction(db, { amount: 10000, dedupGroupId: "g1", dedupResolution: "pending" });
+    await seedTransaction(db, { amount: -10000, dedupGroupId: "g1", dedupResolution: "pending" });
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -81,7 +81,7 @@ describe("evaluateBudgets", () => {
   test("excludes a soft-deleted transaction from the spent total", async () => {
     const db = drizzle(env.DB);
     await db.insert(budgets).values({ category: "Coffee", limitAmount: 10000, periodType: "monthly" });
-    await seedTransaction(db, { amount: 10000, deletedAt: new Date().toISOString() });
+    await seedTransaction(db, { amount: -10000, deletedAt: new Date().toISOString() });
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -94,12 +94,24 @@ describe("evaluateBudgets", () => {
   test("does not alert below the 80% threshold", async () => {
     const db = drizzle(env.DB);
     await db.insert(budgets).values({ category: "Coffee", limitAmount: 10000, periodType: "monthly" });
-    await seedTransaction(db, { amount: 7000 });
+    await seedTransaction(db, { amount: -7000 });
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await evaluateBudgets(db, testEnv);
 
+    expect(result.alerted).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("received money in a budgeted category does not count as spending", async () => {
+    const db = drizzle(env.DB);
+    await db.insert(budgets).values({ category: "Coffee", limitAmount: 10000, periodType: "monthly" });
+    await seedTransaction(db, { amount: -7000 });
+    await seedTransaction(db, { amount: 20000 });
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await evaluateBudgets(db, testEnv);
     expect(result.alerted).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -111,12 +123,12 @@ describe("evaluateBudgets", () => {
   test("[I3] escalating from 80% to 100% within the same month alerts again at the higher threshold", async () => {
     const db = drizzle(env.DB);
     await db.insert(budgets).values({ category: "Coffee", limitAmount: 10000, periodType: "monthly" });
-    await seedTransaction(db, { amount: 8000 });
+    await seedTransaction(db, { amount: -8000 });
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
     const firstRun = await evaluateBudgets(db, testEnv);
     expect(firstRun.alerted).toEqual(["Coffee"]);
 
-    await seedTransaction(db, { amount: 2000 }); // total now 10000 = 100%
+    await seedTransaction(db, { amount: -2000 }); // total now 10000 = 100%
     const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
     const secondRun = await evaluateBudgets(db, testEnv);
@@ -131,7 +143,7 @@ describe("evaluateBudgets", () => {
   test("[I3] does not re-alert at a lower threshold after already alerting at a higher one this month", async () => {
     const db = drizzle(env.DB);
     await db.insert(budgets).values({ category: "Coffee", limitAmount: 10000, periodType: "monthly" });
-    const [tx] = await seedAndReturnTransaction(db, { amount: 10000 });
+    const [tx] = await seedAndReturnTransaction(db, { amount: -10000 });
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
     const firstRun = await evaluateBudgets(db, testEnv);
     expect(firstRun.alerted).toEqual(["Coffee"]);
@@ -139,7 +151,7 @@ describe("evaluateBudgets", () => {
     // Simulate spend dropping to 80% (e.g. a refund soft-deletes the
     // original transaction, replaced by a smaller one).
     await db.update(transactions).set({ deletedAt: new Date().toISOString() }).where(eq(transactions.id, tx.id));
-    await seedTransaction(db, { amount: 8000 });
+    await seedTransaction(db, { amount: -8000 });
 
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);

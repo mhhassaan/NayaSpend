@@ -49,7 +49,7 @@ export async function logMissedTransaction(
   const [row] = await db
     .insert(transactions)
     .values({
-      amount: input.amountCents,
+      amount: -input.amountCents,
       date: input.date,
       vendorRaw,
       vendorNormalized,

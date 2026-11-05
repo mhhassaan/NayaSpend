@@ -8,15 +8,16 @@ describe("trends routes", () => {
   test("GET /?month=2026-10 returns that month's aggregation", async () => {
     const db = drizzle(env.DB);
     await db.insert(transactions).values({
-      amount: 5000, date: "2026-10-15", vendorRaw: "x", vendorNormalized: "x", category: "Coffee",
+      amount: -5000, date: "2026-10-15", vendorRaw: "x", vendorNormalized: "x", category: "Coffee",
       source: "manual_missed", provenance: "{}", reviewStatus: "committed",
     });
 
     const res = await trendsRoutes.request("/?month=2026-10", {}, env);
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { totalCents: number; hasData: boolean };
-    expect(body.totalCents).toBe(5000);
+    const body = (await res.json()) as { spentCents: number; receivedCents: number; hasData: boolean };
+    expect(body.spentCents).toBe(5000);
+    expect(body.receivedCents).toBe(0);
     expect(body.hasData).toBe(true);
   });
 

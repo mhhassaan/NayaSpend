@@ -173,6 +173,21 @@ function fakeClient(
 }
 
 describe("runBackfill", () => {
+  test("writes a high-confidence spend with a negative amount", async () => {
+    const db = drizzle(env.DB);
+    const client = fakeClient(
+      { first: { messages: [{ id: "m-clean" }] } },
+      { "m-clean": cleanTransactionEmail }
+    );
+
+    await runBackfill(db, client);
+
+    const rows = await db.select().from(transactions);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reviewStatus).toBe("committed");
+    expect(rows[0].amount).toBe(-125000);
+  });
+
   test("parses a chunk of matching messages, writes high-confidence ones as committed", async () => {
     const db = drizzle(env.DB);
     const client = fakeClient(
@@ -328,7 +343,7 @@ describe("runBackfill", () => {
   test("a committed Gmail transaction is dedup-checked against an existing statement_import transaction", async () => {
     const db = drizzle(env.DB);
     await db.insert(transactions).values({
-      amount: 125000,
+      amount: -125000,
       date: "2026-10-27",
       vendorRaw: "Starbucks Coffee",
       vendorNormalized: "starbucks coffee",

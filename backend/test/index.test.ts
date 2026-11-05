@@ -170,7 +170,7 @@ describe("scheduled handler", () => {
     const db = drizzle(env.DB);
     await db.insert(budgets).values({ category: "Coffee", limitAmount: 100, periodType: "monthly" });
     await db.insert(transactions).values({
-      amount: 100, date: new Date().toISOString().slice(0, 10), vendorRaw: "x", vendorNormalized: "x",
+      amount: -100, date: new Date().toISOString().slice(0, 10), vendorRaw: "x", vendorNormalized: "x",
       category: "Coffee", source: "manual_missed", provenance: "{}", reviewStatus: "committed",
     });
     const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));

@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, test } from "vitest";
 import { transactionsRoutes } from "../src/routes/transactions";
 import { transactions } from "../src/db/schema";
+import { correctCategory } from "../src/services/categorizationEngine";
 
 async function seed(db: ReturnType<typeof drizzle>, overrides: Partial<typeof transactions.$inferInsert> = {}) {
   const [row] = await db
@@ -24,6 +25,92 @@ async function seed(db: ReturnType<typeof drizzle>, overrides: Partial<typeof tr
 }
 
 describe("transactions routes", () => {
+  test("POST /fix-sign-convention flips only eligible rows and counts actual changes", async () => {
+    const db = drizzle(env.DB);
+    const manual = await seed(db);
+    const gmail = await seed(db, { source: "gmail_email", amount: 125000 });
+    const untouched = await Promise.all([
+      seed(db, { source: "statement_import" }),
+      seed(db, { amount: -50000 }),
+      seed(db, { source: "gmail_email", amount: -125000 }),
+      seed(db, { amount: 0 }),
+      seed(db, { reviewStatus: "pending_review" }),
+      seed(db, { source: "gmail_email", reviewStatus: "pending_review" }),
+      seed(db, { deletedAt: new Date().toISOString() }),
+      seed(db, { source: "gmail_email", deletedAt: new Date().toISOString() }),
+    ]);
+
+    const res = await transactionsRoutes.request("/fix-sign-convention", { method: "POST" }, env);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ fixed: 2 });
+    const [updatedManual] = await db.select().from(transactions).where(eq(transactions.id, manual.id));
+    const [updatedGmail] = await db.select().from(transactions).where(eq(transactions.id, gmail.id));
+    expect(updatedManual).toEqual({ ...manual, amount: -50000 });
+    expect(updatedGmail).toEqual({ ...gmail, amount: -125000 });
+    for (const row of untouched) {
+      const [unchanged] = await db.select().from(transactions).where(eq(transactions.id, row.id));
+      expect(unchanged).toEqual(row);
+    }
+  });
+
+  test("POST /fix-sign-convention is idempotent", async () => {
+    const db = drizzle(env.DB);
+    await seed(db);
+    await seed(db, { source: "gmail_email" });
+
+    const first = await transactionsRoutes.request("/fix-sign-convention", { method: "POST" }, env);
+    const second = await transactionsRoutes.request("/fix-sign-convention", { method: "POST" }, env);
+
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ fixed: 2 });
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ fixed: 0 });
+    const rows = await db.select().from(transactions);
+    expect(rows.map((row) => row.amount)).toEqual([-50000, -50000]);
+  });
+
+  test("POST /recategorize changes only eligible Uncategorized rows and counts actual changes", async () => {
+    const db = drizzle(env.DB);
+    const keyword = await seed(db, { vendorNormalized: "alkhan pharmacy" });
+    const learned = await seed(db, { vendorNormalized: "kfc lahore" });
+    await correctCategory(db, "kfc lahore", "Work meals");
+    const untouched = await Promise.all([
+      seed(db, { vendorNormalized: "kfc lahore", category: "Personal" }),
+      seed(db, { vendorNormalized: "kfc lahore", category: "Food & Dining" }),
+      seed(db, { vendorNormalized: "kfc lahore", category: "uncategorized" }),
+      seed(db, { vendorNormalized: "kfc lahore", deletedAt: new Date().toISOString() }),
+      seed(db, { vendorNormalized: "kfc lahore", reviewStatus: "pending_review" }),
+      seed(db, { vendorNormalized: "unknown vendor" }),
+    ]);
+
+    const res = await transactionsRoutes.request("/recategorize", { method: "POST" }, env);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ recategorized: 2 });
+    const [updatedKeyword] = await db.select().from(transactions).where(eq(transactions.id, keyword.id));
+    const [updatedLearned] = await db.select().from(transactions).where(eq(transactions.id, learned.id));
+    expect(updatedKeyword.category).toBe("Health");
+    expect(updatedLearned.category).toBe("Work meals");
+    for (const row of untouched) {
+      const [unchanged] = await db.select().from(transactions).where(eq(transactions.id, row.id));
+      expect(unchanged).toEqual(row);
+    }
+  });
+
+  test("POST /recategorize is idempotent", async () => {
+    const db = drizzle(env.DB);
+    await seed(db, { vendorNormalized: "alfa mart lahore pk" });
+
+    const first = await transactionsRoutes.request("/recategorize", { method: "POST" }, env);
+    const second = await transactionsRoutes.request("/recategorize", { method: "POST" }, env);
+
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ recategorized: 1 });
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({ recategorized: 0 });
+  });
+
   test("GET / lists committed transactions, newest first, excluding soft-deleted rows", async () => {
     const db = drizzle(env.DB);
     await seed(db, { date: "2026-10-01" });

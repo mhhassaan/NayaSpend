@@ -1,4 +1,4 @@
-import { and, eq, isNull, like, ne, or, sql } from "drizzle-orm";
+import { and, eq, isNull, like, lt, ne, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { budgets, transactions } from "../db/schema";
 import { sendNotification } from "./notificationEngine";
@@ -48,13 +48,14 @@ export async function evaluateBudgets(
 
   for (const budget of allBudgets) {
     const spentRows = await db
-      .select({ total: sql<number>`coalesce(sum(${transactions.amount}), 0)` })
+      .select({ total: sql<number>`coalesce(sum(-${transactions.amount}), 0)` })
       .from(transactions)
       .where(
         and(
           eq(transactions.category, budget.category),
           like(transactions.date, `${monthPrefix}%`),
-          committedNotPendingDedup()
+          committedNotPendingDedup(),
+          lt(transactions.amount, 0)
         )
       );
     const spent = spentRows[0]?.total ?? 0;

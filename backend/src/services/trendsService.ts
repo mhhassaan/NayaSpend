@@ -5,7 +5,8 @@ import { committedNotPendingDedup } from "./budgetAlertTrigger";
 
 export type MonthlyTrends = {
   month: string;
-  totalCents: number;
+  spentCents: number;
+  receivedCents: number;
   byCategory: { category: string; totalCents: number }[];
   hasData: boolean;
 };
@@ -17,14 +18,19 @@ export async function getMonthlyTrends(db: DrizzleD1Database, month: string): Pr
     .where(and(like(transactions.date, `${month}%`), committedNotPendingDedup()));
 
   const totals = new Map<string, number>();
+  let receivedCents = 0;
   for (const row of rows) {
-    totals.set(row.category, (totals.get(row.category) ?? 0) + row.amount);
+    if (row.amount < 0) {
+      totals.set(row.category, (totals.get(row.category) ?? 0) - row.amount);
+    } else if (row.amount > 0) {
+      receivedCents += row.amount;
+    }
   }
 
   const byCategory = Array.from(totals, ([category, totalCents]) => ({ category, totalCents }));
-  const totalCents = byCategory.reduce((sum, c) => sum + c.totalCents, 0);
+  const spentCents = byCategory.reduce((sum, c) => sum + c.totalCents, 0);
 
-  return { month, totalCents, byCategory, hasData: rows.length > 0 };
+  return { month, spentCents, receivedCents, byCategory, hasData: byCategory.length > 0 };
 }
 
 function shiftMonth(year: number, month0: number, delta: number): { year: number; month0: number } {
@@ -67,18 +73,23 @@ export async function getTrendsHistory(
     .where(and(gte(transactions.date, earliestDate), lt(transactions.date, afterLatestDate), committedNotPendingDedup()));
 
   const byMonth = new Map<string, Map<string, number>>();
+  const receivedByMonth = new Map<string, number>();
   for (const row of rows) {
     const key = row.date.slice(0, 7);
     if (!byMonth.has(key)) byMonth.set(key, new Map());
     const totals = byMonth.get(key)!;
-    totals.set(row.category, (totals.get(row.category) ?? 0) + row.amount);
+    if (row.amount < 0) {
+      totals.set(row.category, (totals.get(row.category) ?? 0) - row.amount);
+    } else if (row.amount > 0) {
+      receivedByMonth.set(key, (receivedByMonth.get(key) ?? 0) + row.amount);
+    }
   }
 
   const months = monthKeys.map((month) => {
     const totals = byMonth.get(month);
     const byCategory = totals ? Array.from(totals, ([category, totalCents]) => ({ category, totalCents })) : [];
-    const totalCents = byCategory.reduce((sum, c) => sum + c.totalCents, 0);
-    return { month, totalCents, byCategory, hasData: byCategory.length > 0 };
+    const spentCents = byCategory.reduce((sum, c) => sum + c.totalCents, 0);
+    return { month, spentCents, receivedCents: receivedByMonth.get(month) ?? 0, byCategory, hasData: byCategory.length > 0 };
   });
 
   return { months };

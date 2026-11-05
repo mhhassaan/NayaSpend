@@ -7,7 +7,8 @@ import { formatCents, parseRupeesToCents } from "../utils/money";
 
 type MonthlyTrends = {
   month: string;
-  totalCents: number;
+  spentCents: number;
+  receivedCents: number;
   byCategory: { category: string; totalCents: number }[];
   hasData: boolean;
 };
