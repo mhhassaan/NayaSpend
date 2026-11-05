@@ -1,3 +1,4 @@
+import { CaptureHealthEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -66,7 +67,7 @@ function StatusSection({ health, justConnected }: { health: CaptureHealthData; j
 
   if (health.runStatus === "job_did_not_run" && !health.lastAttemptedRun && !health.lastSuccessfulRun) {
     return (
-      <EmptyState
+      <EmptyState icon={<CaptureHealthEmptyIllustration />}
         message="Gmail not connected yet."
         actionLabel="Connect Gmail"
         onAction={() => {

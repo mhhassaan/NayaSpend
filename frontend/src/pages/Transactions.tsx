@@ -1,3 +1,4 @@
+import { TransactionsEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { StatementUploadIcon } from "../components/icons";
@@ -309,7 +310,7 @@ export function Transactions() {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <EmptyState message="No transactions yet." />
+        <EmptyState icon={<TransactionsEmptyIllustration />} message="No transactions yet." />
       </div>
     );
   }

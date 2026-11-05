@@ -1,3 +1,4 @@
+import { BillsEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
@@ -304,7 +305,7 @@ export function Bills() {
       )}
 
       {billsList.length === 0 ? (
-        <EmptyState message="No bills yet." />
+        <EmptyState icon={<BillsEmptyIllustration />} message="No bills yet." />
       ) : (
         <ListReveal items={billsList.map((b) => (
             <BillRow key={b.id} bill={b} />

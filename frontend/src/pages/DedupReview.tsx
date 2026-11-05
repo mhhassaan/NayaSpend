@@ -1,3 +1,4 @@
+import { DedupEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
@@ -88,7 +89,7 @@ export function DedupReview() {
   const pairs = groupPairs(query.data!);
 
   if (pairs.length === 0) {
-    return <EmptyState message="No duplicates to review." />;
+    return <EmptyState icon={<DedupEmptyIllustration />} message="No duplicates to review." />;
   }
 
   function toggleSelected(groupId: string) {

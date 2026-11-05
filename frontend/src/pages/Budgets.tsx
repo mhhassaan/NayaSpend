@@ -1,3 +1,4 @@
+import { BudgetsEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
@@ -278,7 +279,7 @@ export function Budgets() {
       )}
 
       {budgetsList.length === 0 ? (
-        <EmptyState message="No budgets yet." />
+        <EmptyState icon={<BudgetsEmptyIllustration />} message="No budgets yet." />
       ) : (
         <ListReveal items={budgetsList.map((b) => (
             <BudgetRow key={b.id} budget={b} trends={trends} />

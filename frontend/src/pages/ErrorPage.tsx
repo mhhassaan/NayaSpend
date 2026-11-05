@@ -1,3 +1,4 @@
+import { NotFoundIllustration } from "../components/illustrations";
 import { useNavigate, useRouteError } from "react-router-dom";
 import { EmptyState } from "../components";
 
@@ -12,7 +13,7 @@ export function ErrorPage() {
   }
 
   return (
-    <EmptyState
+    <EmptyState icon={<NotFoundIllustration />}
       message="Something went wrong."
       actionLabel="Go to Dashboard"
       onAction={() => navigate("/")}
