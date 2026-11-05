@@ -4,6 +4,17 @@ import { describe, expect, test } from "vitest";
 import { AppShell } from "./AppShell";
 
 describe("AppShell", () => {
+  test("renders its children at a non-root route", () => {
+    render(
+      <MemoryRouter initialEntries={["/transactions"]}>
+        <AppShell>
+          <div>transactions content</div>
+        </AppShell>
+      </MemoryRouter>
+    );
+    expect(screen.getByText("transactions content")).toBeInTheDocument();
+  });
+
   test("renders nav links for the primary pages and a Log transaction quick action", () => {
     render(
       <MemoryRouter>

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
+import { PageTransition } from "./PageTransition";
 import {
   BillsIcon,
   BudgetsIcon,
@@ -32,6 +33,7 @@ function navLinkClass({ isActive }: { isActive: boolean }) {
 // Dashboard's quick-action Tile grid, not this primary nav, per the
 // design doc's own page-layout pattern.
 export function AppShell({ children }: { children: ReactNode }) {
+  const location = useLocation();
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="hidden w-60 flex-col gap-1 border-r border-mid-grey bg-bg-surface p-4 md:flex">
@@ -58,7 +60,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </NavLink>
         </header>
 
-        <main className="flex-1 p-4 pb-20 md:pb-4">{children}</main>
+        <main className="flex-1 p-4 pb-20 md:pb-4">
+          <PageTransition key={location.pathname}>{children}</PageTransition>
+        </main>
 
         <nav className="fixed inset-x-0 bottom-0 flex items-center justify-around border-t border-mid-grey bg-bg-surface py-2 md:hidden">
           {NAV_ITEMS.map(({ to, label, icon: Icon }) => (

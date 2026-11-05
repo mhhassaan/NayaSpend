@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { motion, useReducedMotion } from "motion/react";
 import { apiClient } from "../api/client";
 import { Card, EmptyState, Pill, StatDisplay, Tile, showError } from "../components";
 import { BillsIcon, BudgetsIcon, StatementUploadIcon, TransactionsIcon } from "../components/icons";
@@ -26,24 +25,6 @@ function shiftMonth(month: string, delta: number): string {
   const [year, m] = month.split("-").map(Number);
   const date = new Date(Date.UTC(year, m - 1 + delta, 1));
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-// This task's pattern, referenced (not repeated) by every later page task:
-// a useQuery per data need; skeleton while isPending; an error block with
-// Retry + a one-time showError toast on isError; EmptyState when the
-// result has no data; otherwise the real content, fading in (respecting
-// prefers-reduced-motion).
-function FadeIn({ children }: { children: React.ReactNode }) {
-  const reduceMotion = useReducedMotion();
-  return (
-    <motion.div
-      initial={reduceMotion ? false : { opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: reduceMotion ? 0 : 0.2 }}
-    >
-      {children}
-    </motion.div>
-  );
 }
 
 export function Dashboard() {
@@ -132,7 +113,6 @@ export function Dashboard() {
   const monthlySpentCents = monthData.spentCents;
 
   return (
-    <FadeIn>
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-end gap-6">
           <div className="flex flex-wrap items-center gap-3">
@@ -239,6 +219,5 @@ export function Dashboard() {
           )}
         </Card>
       </div>
-    </FadeIn>
   );
 }
