@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { PageTransition } from "./PageTransition";
+import { showError } from "./ToastProvider";
 import {
   BillsIcon,
   BudgetsIcon,
@@ -30,6 +31,18 @@ function navLinkClass({ isActive }: { isActive: boolean }) {
 // on the Transactions page and Dashboard's quick-action Tile grid.
 export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  async function signOut() {
+    try {
+      await fetch("/api/auth/google/logout", { method: "POST", credentials: "include" });
+    } catch {
+      showError("Couldn't sign out -- try again.");
+      return;
+    }
+    navigate("/login");
+  }
+
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="hidden w-60 flex-col gap-1 border-r border-mid-grey bg-bg-surface p-4 md:flex">
@@ -40,11 +53,21 @@ export function AppShell({ children }: { children: ReactNode }) {
             {label}
           </NavLink>
         ))}
+        <button
+          type="button"
+          onClick={signOut}
+          className="mt-auto flex items-center gap-3 rounded-md px-3 py-2 font-body text-[15px] font-medium text-text-secondary transition-colors hover:bg-silver-frost"
+        >
+          Sign out
+        </button>
       </aside>
 
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-mid-grey bg-bg-surface px-4 py-3 md:hidden">
           <span className="font-display text-[18px] font-bold text-blackberry">NayaSpend</span>
+          <button type="button" onClick={signOut} className="font-body text-[13px] font-medium text-text-secondary">
+            Sign out
+          </button>
         </header>
 
         <main className="flex-1 p-4 pb-20 md:pb-4">

@@ -3,6 +3,7 @@ import { getCookie, setCookie } from "hono/cookie";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { loadConfig, type ConfigEnv } from "../config";
+import { requireAuth, type AuthUser } from "../middleware/auth";
 import { authIdentities, users } from "../db/schema";
 import { randomNonce, signState, verifyState } from "../oauthState";
 import { createSession, deleteSession } from "../services/sessionStore";
@@ -13,7 +14,7 @@ const STATE_MAX_AGE_SECONDS = 10 * 60;
 
 // [Phase 8 Task 5] Chained so `typeof authGoogleRoutes` carries every
 // route's schema -- see the identical fix/explanation in index.ts.
-export const authGoogleRoutes = new Hono<{ Bindings: Env }>()
+export const authGoogleRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
   .get("/login", async (c) => {
     const config = loadConfig(c.env);
     const nonce = randomNonce();
@@ -117,4 +118,7 @@ export const authGoogleRoutes = new Hono<{ Bindings: Env }>()
       httpOnly: true, secure: true, sameSite: "None", path: "/", maxAge: 0,
     });
     return c.body(null, 204);
+  })
+  .get("/me", requireAuth, async (c) => {
+    return c.json(c.get("user"));
   });

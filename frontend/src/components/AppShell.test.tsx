@@ -23,9 +23,9 @@ describe("AppShell", () => {
         </AppShell>
       </MemoryRouter>
     );
-    // Both a desktop sidebar and a mobile bottom-tab-bar nav are always
-    // rendered (CSS-hidden per breakpoint, not conditionally mounted), so
-    // each label appears twice.
+    // Both a desktop sidebar and a mobile app-name bar/bottom-tab-bar nav
+    // are always rendered (CSS-hidden per breakpoint, not conditionally
+    // mounted), so each label appears twice.
     for (const label of ["Dashboard", "Transactions", "Dedup Review", "Budgets", "Bills", "Capture Health"]) {
       expect(screen.getAllByRole("link", { name: label }).length).toBeGreaterThan(0);
     }
@@ -40,5 +40,16 @@ describe("AppShell", () => {
       </MemoryRouter>
     );
     expect(screen.getByText("page content")).toBeInTheDocument();
+  });
+
+  test("[Phase 8 Task 12] renders a sign-out action", () => {
+    render(
+      <MemoryRouter>
+        <AppShell>
+          <div />
+        </AppShell>
+      </MemoryRouter>
+    );
+    expect(screen.getAllByRole("button", { name: /sign out/i }).length).toBeGreaterThan(0);
   });
 });

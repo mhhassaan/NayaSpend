@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 import { authGoogleRoutes } from "../src/routes/authGoogle";
 import { authIdentities, gmailCredentials, sessions, users } from "../src/db/schema";
 import { validateSession } from "../src/services/sessionStore";
+import { seedUserAndSession } from "./helpers/authedRequest";
 
 const testEnv = {
   ...env,
@@ -113,5 +114,16 @@ describe("authGoogle routes", () => {
     // signup attempt, not that the table is literally empty.
     expect(await db.select().from(users)).toHaveLength(1);
     expect(await db.select().from(authIdentities)).toHaveLength(0);
+  });
+  test("GET /me returns the authenticated user as JSON", async () => {
+    const { userId, cookie } = await seedUserAndSession(drizzle(env.DB));
+    const res = await authGoogleRoutes.request("/me", { headers: { Cookie: cookie } }, testEnv);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { id: number };
+    expect(body.id).toBe(userId);
+  });
+  test("GET /me with no session cookie returns 401", async () => {
+    const res = await authGoogleRoutes.request("/me", {}, testEnv);
+    expect(res.status).toBe(401);
   });
 });
