@@ -11,6 +11,37 @@ vi.mock("../components", async (importOriginal) => {
 });
 
 describe("Dashboard", () => {
+  test("[first-ever-use] shows the full hero takeover when every month in the 6-month history has no data", async () => {
+    const month = new Date().toISOString().slice(0, 7);
+    mockFetch([
+      { test: urlContains("/api/trends?"), respond: () => jsonResponse({ month, spentCents: 0, receivedCents: 0, byCategory: [], hasData: false }) },
+      { test: urlContains("/api/trends/history"), respond: () => jsonResponse({ months: Array.from({ length: 6 }, (_, i) => ({ month: `2026-${String(i + 6).padStart(2, "0")}`, spentCents: 0, receivedCents: 0, byCategory: [], hasData: false })) }) },
+    ]);
+    renderWithProviders(<Dashboard />);
+    expect(await screen.findByText(/welcome/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /upload statement/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /log a transaction/i })).toBeInTheDocument();
+    expect(screen.queryByText(/^Spend for /)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Budgets$/ })).not.toBeInTheDocument();
+    const emptyMessage = screen.getByText(/no spending recorded yet/i);
+    expect(emptyMessage.parentElement!.querySelector("svg")).toBeNull();
+    expect(within(emptyMessage.parentElement!).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  test("a returning user's empty month shows the richer EmptyState with an Upload-statement action, not the hero", async () => {
+    const month = new Date().toISOString().slice(0, 7);
+    mockFetch([
+      { test: urlContains("/api/trends?"), respond: () => jsonResponse({ month, spentCents: 0, receivedCents: 0, byCategory: [], hasData: false }) },
+      { test: urlContains("/api/trends/history"), respond: () => jsonResponse({ months: [{ month: "2026-10", spentCents: 5000, receivedCents: 0, byCategory: [{ category: "Coffee", totalCents: 5000 }], hasData: true }] }) },
+    ]);
+    renderWithProviders(<Dashboard />);
+    const emptyMessage = await screen.findByText(/no spending recorded yet/i);
+    expect(emptyMessage).toBeInTheDocument();
+    expect(screen.queryByText(/welcome/i)).not.toBeInTheDocument();
+    expect(within(emptyMessage.parentElement!).getByRole("button", { name: /upload statement/i })).toBeInTheDocument();
+    expect(emptyMessage.parentElement!.querySelector("svg")).toBeInTheDocument();
+  });
+
   test("shows a skeleton while the month breakdown is loading", () => {
     mockFetch([
       { test: urlContains("/api/trends?"), respond: () => new Promise(() => {}) },
@@ -198,8 +229,10 @@ describe("Dashboard spending insights", () => {
     setup({ total: 10000, categories: [{ category: "Coffee", totalCents: 2000 }, { category: "Rent", totalCents: 8000 }] });
     const bars = await screen.findAllByRole("meter");
     expect(bars.map((bar) => bar.getAttribute("aria-label"))).toEqual(["Rent share of spending", "Coffee share of spending"]);
-    expect(bars[0]).toHaveStyle({ width: "80%" });
-    expect(bars[1]).toHaveStyle({ width: "20%" });
+    await waitFor(() => {
+      expect(bars[0]).toHaveStyle({ width: "80%" });
+      expect(bars[1]).toHaveStyle({ width: "20%" });
+    });
   });
 
   test("renders budgets with spent, limits, percentages and threshold tones", async () => {

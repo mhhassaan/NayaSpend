@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { motion, useReducedMotion } from "motion/react";
 import { apiClient } from "../api/client";
 import { Card, EmptyState, Pill, StatDisplay, Tile, showError } from "../components";
 import { BillsIcon, BudgetsIcon, StatementUploadIcon, TransactionsIcon } from "../components/icons";
+import { HeroIllustration, MonthEmptyIllustration, HistoryEmptyIllustration } from "../components/illustrations";
 
 import { formatCents } from "../utils/money";
 import type { Budget } from "../types/transaction";
@@ -29,6 +31,7 @@ function shiftMonth(month: string, delta: number): string {
 
 export function Dashboard() {
   const [month, setMonth] = useState(currentMonth());
+  const reduceMotion = useReducedMotion();
 
   const monthQuery = useQuery({
     queryKey: ["trends", month],
@@ -95,6 +98,7 @@ export function Dashboard() {
 
   const monthData = monthQuery.data!;
   const historyData = historyQuery.data!;
+  const everUsed = historyData.months.some((m) => m.hasData);
   const maxHistoryTotal = Math.max(1, ...historyData.months.map((m) => m.spentCents));
 
   const selectedHistory = historyData.months.find((entry) => entry.month === month);
@@ -114,6 +118,31 @@ export function Dashboard() {
 
   return (
       <div className="flex flex-col gap-6">
+        {!everUsed && !monthData.hasData ? (
+          <Card>
+            <section className="flex flex-col items-center gap-4 p-4 text-center">
+              <HeroIllustration />
+              <h1 className="font-body text-[20px] font-semibold">Welcome — let's get your spending in</h1>
+              <div className="flex flex-wrap justify-center gap-3">
+                <button
+                  type="button"
+                  className="flex items-center gap-2 rounded-md bg-blackberry px-4 py-2 font-body text-[15px] font-semibold text-hyper-white"
+                  onClick={() => (window.location.href = "/statement-upload")}
+                >
+                  Upload statement
+                </button>
+                <button
+                  type="button"
+                  className="flex items-center gap-2 rounded-sm border border-mid-grey bg-hyper-white px-4 py-2 font-body text-[15px] font-semibold text-blackberry"
+                  onClick={() => (window.location.href = "/log-transaction")}
+                >
+                  Log a transaction
+                </button>
+              </div>
+            </section>
+          </Card>
+        ) : (
+          <>
         <div className="flex flex-wrap items-end gap-6">
           <div className="flex flex-wrap items-center gap-3">
             <StatDisplay label={`Spend for ${monthData.month}`} value={formatCents(monthlySpentCents)} />
@@ -137,6 +166,8 @@ export function Dashboard() {
           <Tile icon={<BudgetsIcon />} label="Budgets" onClick={() => (window.location.href = "/budgets")} />
           <Tile icon={<BillsIcon />} label="Bills" onClick={() => (window.location.href = "/bills")} />
         </div>
+          </>
+        )}
 
         <Card>
           <div className="mb-3 flex items-center justify-between">
@@ -150,7 +181,12 @@ export function Dashboard() {
           </div>
 
           {!monthData.hasData ? (
-            <EmptyState message="No spending recorded yet for this month." />
+            <EmptyState
+              message="No spending recorded yet for this month."
+              icon={everUsed ? <MonthEmptyIllustration /> : undefined}
+              actionLabel={everUsed ? "Upload statement" : undefined}
+              onAction={everUsed ? () => (window.location.href = "/statement-upload") : undefined}
+            />
           ) : (
             <div className="flex flex-col gap-2">
               {categories.map((c) => {
@@ -162,14 +198,16 @@ export function Dashboard() {
                       <span className="font-body text-[15px] font-semibold">{formatCents(c.totalCents)}</span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-xl bg-mid-grey">
-                      <div
+                      <motion.div
                         role="meter"
                         aria-label={`${c.category} share of spending`}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={share}
                         className="h-full rounded-xl bg-accent"
-                        style={{ width: `${share}%` }}
+                        initial={{ width: reduceMotion ? `${share}%` : "0%" }}
+                        animate={{ width: `${share}%` }}
+                        transition={{ duration: reduceMotion ? 0 : 0.3 }}
                       />
                     </div>
                   </div>
@@ -203,7 +241,7 @@ export function Dashboard() {
         <Card>
           <p className="mb-3 font-body text-[15px] font-semibold text-text-secondary">Last 6 months</p>
           {historyData.months.every((m) => !m.hasData) ? (
-            <EmptyState message="No statement imported for this account yet." />
+            <EmptyState message="No statement imported for this account yet." icon={<HistoryEmptyIllustration />} />
           ) : (
             <div data-testid="trends-history-chart" className="flex items-end gap-2" style={{ height: 120 }}>
               {historyData.months.map((m) => (
