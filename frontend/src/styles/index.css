@@ -10,6 +10,54 @@ body {
   font: var(--text-body);
 }
 
+/* Brand-matched scrollbar (Firefox + WebKit/Chromium/Edge). Thin, rounded,
+   mid-grey thumb on the page background -- matches the app's neutral
+   palette instead of the OS default. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-mid-grey) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-mid-grey);
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-deep-grey);
+}
+
+/* Tints native form controls (date/time pickers, checkboxes, radios,
+   range sliders) with the brand accent instead of the browser's default
+   blue -- the one part of native control chrome every browser lets us
+   recolor without replacing the control entirely. */
+input,
+select,
+textarea {
+  accent-color: var(--color-electric-orange);
+}
+
+/* The native date/time picker indicator (calendar icon) in WebKit/Blink
+   browsers -- tinted via filter since it's rendered as a fixed black
+   glyph with no direct color property. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 /* Sonner toast tone classes, matching frontend-design-system.md's Toast
    spec (color-coded by --color-success/--color-warning/--color-danger). */
 .toast-success {
