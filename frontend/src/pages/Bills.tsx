@@ -1,13 +1,14 @@
+import { BillsEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import { Button, Card, EmptyState, Modal, Pill, showError, showSuccess } from "../components";
+import { Button, Card, EmptyState, ListReveal, Modal, Pill, showError, showSuccess } from "../components";
 import type { Bill } from "../types/transaction";
 import { formatCents, parseRupeesToCents } from "../utils/money";
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-// Same round-trip-through-Date validation the backend uses (bills.ts) --
+// Check the due date before submitting by round-tripping through Date --
 // the regex alone accepts calendar-impossible values like "2026-02-31".
 function isValidIsoDate(date: string): boolean {
   if (!ISO_DATE_PATTERN.test(date)) return false;
@@ -17,15 +18,15 @@ function isValidIsoDate(date: string): boolean {
 type BillFormState = { vendor: string; expectedAmount: string; expectedInterval: string; nextDueDate: string };
 
 function validateBillForm(form: BillFormState): string | null {
-  if (!form.vendor.trim()) return "vendor must be a non-empty string";
+  if (!form.vendor.trim()) return "Enter a vendor name.";
   const expectedAmountCents = parseRupeesToCents(form.expectedAmount);
   if (!Number.isFinite(expectedAmountCents) || expectedAmountCents <= 0) {
-    return "expectedAmount must be a positive integer";
+    return "Enter an expected amount greater than zero.";
   }
   if (!isValidIsoDate(form.nextDueDate)) {
-    return "nextDueDate must be a valid ISO YYYY-MM-DD calendar date";
+    return "Enter a valid due date in YYYY-MM-DD format.";
   }
-  if (!form.expectedInterval.trim()) return "expectedInterval must be a non-empty string";
+  if (!form.expectedInterval.trim()) return "Enter how often this bill repeats (e.g. monthly).";
   return null;
 }
 
@@ -35,7 +36,7 @@ function BillFormFields({ form, onChange }: { form: BillFormState; onChange: (fo
       <label className="flex flex-col gap-1">
         <span className="font-body text-[13px] font-semibold text-text-secondary">Vendor</span>
         <input
-          aria-label="Vendor"
+          aria-label="Vendor" placeholder="e.g. Netflix"
           className="rounded-sm border border-mid-grey px-3 py-2"
           value={form.vendor}
           onChange={(e) => onChange({ ...form, vendor: e.target.value })}
@@ -44,7 +45,7 @@ function BillFormFields({ form, onChange }: { form: BillFormState; onChange: (fo
       <label className="flex flex-col gap-1">
         <span className="font-body text-[13px] font-semibold text-text-secondary">Expected amount (Rs.)</span>
         <input
-          aria-label="Expected amount"
+          aria-label="Expected amount" placeholder="e.g. 1500"
           type="text"
           inputMode="numeric"
           className="rounded-sm border border-mid-grey px-3 py-2"
@@ -55,7 +56,7 @@ function BillFormFields({ form, onChange }: { form: BillFormState; onChange: (fo
       <label className="flex flex-col gap-1">
         <span className="font-body text-[13px] font-semibold text-text-secondary">Expected interval</span>
         <input
-          aria-label="Expected interval"
+          aria-label="Expected interval" placeholder="e.g. monthly"
           className="rounded-sm border border-mid-grey px-3 py-2"
           value={form.expectedInterval}
           onChange={(e) => onChange({ ...form, expectedInterval: e.target.value })}
@@ -64,7 +65,7 @@ function BillFormFields({ form, onChange }: { form: BillFormState; onChange: (fo
       <label className="flex flex-col gap-1">
         <span className="font-body text-[13px] font-semibold text-text-secondary">Next due date</span>
         <input
-          aria-label="Next due date"
+          aria-label="Next due date" placeholder="YYYY-MM-DD"
           className="rounded-sm border border-mid-grey px-3 py-2"
           value={form.nextDueDate}
           onChange={(e) => onChange({ ...form, nextDueDate: e.target.value })}
@@ -304,13 +305,13 @@ export function Bills() {
       )}
 
       {billsList.length === 0 ? (
-        <EmptyState message="No bills yet." />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {billsList.map((b) => (
-            <BillRow key={b.id} bill={b} />
-          ))}
+        <div className="flex min-h-[55vh] items-center justify-center">
+          <EmptyState icon={<BillsEmptyIllustration />} message="No bills yet." />
         </div>
+      ) : (
+        <ListReveal items={billsList.map((b) => (
+            <BillRow key={b.id} bill={b} />
+          ))} />
       )}
     </div>
   );

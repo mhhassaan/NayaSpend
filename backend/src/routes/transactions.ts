@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { requireAuth, type AuthUser } from "../middleware/auth";
 import { transactions } from "../db/schema";
 import { categorize, correctCategory, normalize } from "../services/categorizationEngine";
 import { runDedupCheck } from "../services/dedupEngine";
@@ -34,13 +35,15 @@ type Env = {
 // for this sub-app. See the identical fix in index.ts for the full
 // explanation; the same issue exists in every route file independently,
 // since each is its own Hono instance mounted into the main app.
-export const transactionsRoutes = new Hono<{ Bindings: Env }>()
+export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
+  .use(requireAuth)
   .post("/fix-sign-convention", async (c) => {
     const db = drizzle(c.env.DB);
     const result = await db
       .update(transactions)
       .set({ amount: sql`-${transactions.amount}` })
       .where(and(
+        eq(transactions.userId, c.get("user").id),
         inArray(transactions.source, ["manual_missed", "gmail_email"]),
         eq(transactions.reviewStatus, "committed"),
         isNull(transactions.deletedAt),
@@ -53,6 +56,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
   .post("/recategorize", async (c) => {
     const db = drizzle(c.env.DB);
     const eligible = and(
+      eq(transactions.userId, c.get("user").id),
       eq(transactions.category, "Uncategorized"),
       eq(transactions.reviewStatus, "committed"),
       isNull(transactions.deletedAt)
@@ -61,7 +65,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
     let recategorized = 0;
 
     for (const row of rows) {
-      const category = await categorize(db, row.vendorNormalized);
+      const category = await categorize(db, row.vendorNormalized, c.get("user").id);
       if (category === "Uncategorized") continue;
 
       // Recheck eligibility so a concurrent manual correction is never overwritten.
@@ -83,9 +87,11 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
       .select()
       .from(transactions)
       .where(
-        reviewStatus
-          ? and(isNull(transactions.deletedAt), eq(transactions.reviewStatus, reviewStatus))
-          : isNull(transactions.deletedAt)
+        and(
+          eq(transactions.userId, c.get("user").id),
+          isNull(transactions.deletedAt),
+          reviewStatus ? eq(transactions.reviewStatus, reviewStatus) : undefined
+        )
       )
       .orderBy(desc(transactions.date));
 
@@ -94,7 +100,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
   .get("/:id", async (c) => {
     const id = Number(c.req.param("id"));
     const db = drizzle(c.env.DB);
-    const [row] = await db.select().from(transactions).where(eq(transactions.id, id));
+    const [row] = await db.select().from(transactions).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
 
     if (!row) {
       return c.text("not found", 404);
@@ -104,7 +110,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
   .patch("/:id", async (c) => {
     const id = Number(c.req.param("id"));
     const db = drizzle(c.env.DB);
-    const [row] = await db.select().from(transactions).where(eq(transactions.id, id));
+    const [row] = await db.select().from(transactions).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
 
     if (!row) {
       return c.text("not found", 404);
@@ -146,14 +152,14 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
       updates.category = category;
     }
 
-    await db.update(transactions).set(updates).where(eq(transactions.id, id));
-    const [updated] = await db.select().from(transactions).where(eq(transactions.id, id));
+    await db.update(transactions).set(updates).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
+    const [updated] = await db.select().from(transactions).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
     return c.json(updated);
   })
   .patch("/:id/category", async (c) => {
     const id = Number(c.req.param("id"));
     const db = drizzle(c.env.DB);
-    const [row] = await db.select().from(transactions).where(eq(transactions.id, id));
+    const [row] = await db.select().from(transactions).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
 
     if (!row) {
       return c.text("not found", 404);
@@ -170,15 +176,15 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
       return c.text("category must be a non-empty string", 400);
     }
 
-    await db.update(transactions).set({ category }).where(eq(transactions.id, id));
-    await correctCategory(db, row.vendorNormalized, category);
+    await db.update(transactions).set({ category }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
+    await correctCategory(db, row.vendorNormalized, category, c.get("user").id);
 
     return c.json({ id, category });
   })
   .post("/:id/resolve-review", async (c) => {
     const id = Number(c.req.param("id"));
     const db = drizzle(c.env.DB);
-    const [row] = await db.select().from(transactions).where(eq(transactions.id, id));
+    const [row] = await db.select().from(transactions).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
 
     if (!row) {
       return c.text("not found", 404);
@@ -199,7 +205,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
     }
 
     if (action === "reject") {
-      await db.update(transactions).set({ deletedAt: new Date().toISOString() }).where(eq(transactions.id, id));
+      await db.update(transactions).set({ deletedAt: new Date().toISOString() }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
       return c.json({ resolved: "reject", matched: false });
     }
 
@@ -212,7 +218,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
       return c.text("amount must be a positive integer before this row can be committed", 400);
     }
 
-    await db.update(transactions).set({ reviewStatus: "committed" }).where(eq(transactions.id, id));
+    await db.update(transactions).set({ reviewStatus: "committed" }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
     // Committing a quarantined row makes it eligible for dedup comparison for
     // the first time -- the spec requires re-running the check immediately
     // against the now-larger committed set, not waiting for some other event.
@@ -234,7 +240,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
       return c.text(`action must be one of: ${DEDUP_ACTIONS.join(", ")}`, 400);
     }
 
-    const [target] = await db.select().from(transactions).where(eq(transactions.id, id));
+    const [target] = await db.select().from(transactions).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
     if (!target) {
       return c.text("not found", 404);
     }
@@ -254,7 +260,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
     const [counterpart] = await db
       .select()
       .from(transactions)
-      .where(and(eq(transactions.dedupGroupId, target.dedupGroupId), ne(transactions.id, target.id)));
+      .where(and(eq(transactions.userId, c.get("user").id), eq(transactions.dedupGroupId, target.dedupGroupId), ne(transactions.id, target.id)));
     if (!counterpart) {
       // runDedupCheck always writes a dedup_group_id to exactly two rows --
       // a missing counterpart means the data is already inconsistent, not
@@ -277,8 +283,8 @@ export const transactionsRoutes = new Hono<{ Bindings: Env }>()
           : [{ dedupResolution: "confirmed_distinct" as const }, { dedupResolution: "confirmed_distinct" as const }];
 
     await db.batch([
-      db.update(transactions).set(targetUpdate).where(eq(transactions.id, target.id)),
-      db.update(transactions).set(counterpartUpdate).where(eq(transactions.id, counterpart.id)),
+      db.update(transactions).set(targetUpdate).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, target.id))),
+      db.update(transactions).set(counterpartUpdate).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, counterpart.id))),
     ]);
 
     return c.json({ resolved: resolution });

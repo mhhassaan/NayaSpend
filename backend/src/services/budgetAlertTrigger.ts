@@ -38,13 +38,14 @@ function alreadyAlertedAtOrAbove(threshold: string, lastAlertedThreshold: string
 
 export async function evaluateBudgets(
   db: DrizzleD1Database,
-  env: Partial<ConfigEnv>
+  env: Partial<ConfigEnv>,
+  userId: number
 ): Promise<{ alerted: string[] }> {
   const monthStart = currentMonthStart();
   const monthPrefix = monthStart.slice(0, 7); // "YYYY-MM"
   const alerted: string[] = [];
 
-  const allBudgets = await db.select().from(budgets);
+  const allBudgets = await db.select().from(budgets).where(eq(budgets.userId, userId));
 
   for (const budget of allBudgets) {
     const spentRows = await db
@@ -52,6 +53,7 @@ export async function evaluateBudgets(
       .from(transactions)
       .where(
         and(
+          eq(transactions.userId, userId),
           eq(transactions.category, budget.category),
           like(transactions.date, `${monthPrefix}%`),
           committedNotPendingDedup(),

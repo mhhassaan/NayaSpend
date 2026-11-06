@@ -29,6 +29,20 @@
       "when": 1793716466527,
       "tag": "0003_budget_bill_alert_state",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793873902512,
+      "tag": "0004_magical_human_robot",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793877627258,
+      "tag": "0005_tricky_gunslinger",
+      "breakpoints": true
     }
   ]
 }

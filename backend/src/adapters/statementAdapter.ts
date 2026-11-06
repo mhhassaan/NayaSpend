@@ -137,7 +137,8 @@ export function parseStatementCsv(csvText: string, _fileRef: string): ParsedCsvR
 export async function importStatementCsv(
   db: DrizzleD1Database,
   csvText: string,
-  fileRef: string
+  fileRef: string,
+  userId: number
 ): Promise<{ imported: number }> {
   const rows = parseStatementCsv(csvText, fileRef);
 
@@ -148,10 +149,11 @@ export async function importStatementCsv(
     const statementRowKey = `${fileRef}:${row.rowIndex}`;
 
     if (row.confidence === "high") {
-      const category = await categorize(db, row.vendorRaw);
+      const category = await categorize(db, row.vendorRaw, userId);
       const [inserted] = await db
         .insert(transactions)
         .values({
+          userId,
           amount: row.amountCents,
           date: row.date,
           vendorRaw: row.vendorRaw,
@@ -175,6 +177,7 @@ export async function importStatementCsv(
       await db
         .insert(transactions)
         .values({
+          userId,
           amount: 0,
           date: new Date().toISOString().slice(0, 10),
           vendorRaw: "(unrecognized)",

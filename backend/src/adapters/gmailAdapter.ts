@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { captureRuns, transactions } from "../db/schema";
 import { categorize, normalize } from "../services/categorizationEngine";
@@ -12,12 +12,12 @@ const BODY_EXCERPT_LENGTH = 500;
 
 type TransactionInsert = typeof transactions.$inferInsert;
 
-async function getOrCreateCaptureRun(db: DrizzleD1Database) {
-  const [existing] = await db.select().from(captureRuns);
+async function getOrCreateCaptureRun(db: DrizzleD1Database, userId: number) {
+  const [existing] = await db.select().from(captureRuns).where(eq(captureRuns.userId, userId));
   if (existing) return existing;
 
-  await db.insert(captureRuns).values({ runStatus: "job_did_not_run" });
-  const [created] = await db.select().from(captureRuns);
+  await db.insert(captureRuns).values({ userId, runStatus: "job_did_not_run" });
+  const [created] = await db.select().from(captureRuns).where(eq(captureRuns.userId, userId));
   return created;
 }
 
@@ -25,7 +25,7 @@ function buildCommittedRow(message: GmailMessage, category: string, parsed: {
   amountCents: number;
   date: string;
   vendorRaw: string;
-}): TransactionInsert {
+}): Omit<TransactionInsert, "userId"> {
   return {
     amount: -parsed.amountCents,
     date: parsed.date,
@@ -56,7 +56,7 @@ function matchesNayaPayScope(message: GmailMessage): boolean {
   );
 }
 
-function buildQuarantinedRow(message: GmailMessage, reason: string): TransactionInsert {
+function buildQuarantinedRow(message: GmailMessage, reason: string): Omit<TransactionInsert, "userId"> {
   return {
     amount: 0,
     date: new Date(Number(message.internalDate)).toISOString().slice(0, 10),
@@ -91,6 +91,7 @@ type FetchAndBuildResult = {
 async function fetchAndBuildRows(
   db: DrizzleD1Database,
   client: GmailClient,
+  userId: number,
   ids: string[],
   options?: { enforceScope?: boolean }
 ): Promise<FetchAndBuildResult> {
@@ -123,11 +124,11 @@ async function fetchAndBuildRows(
     const parsed = parseNayaPayEmail(message);
 
     if (parsed.confidence === "high") {
-      const category = await categorize(db, parsed.vendorRaw);
-      rows.push(buildCommittedRow(message, category, parsed));
+      const category = await categorize(db, parsed.vendorRaw, userId);
+      rows.push({ ...buildCommittedRow(message, category, parsed), userId });
       committedCount++;
     } else {
-      rows.push(buildQuarantinedRow(message, parsed.reason));
+      rows.push({ ...buildQuarantinedRow(message, parsed.reason), userId });
       quarantinedCount++;
     }
   }
@@ -138,17 +139,18 @@ async function fetchAndBuildRows(
 export async function runBackfill(
   db: DrizzleD1Database,
   client: GmailClient,
+  userId: number,
   options?: { maxMessagesPerChunk?: number }
-): Promise<{ processed: number; nextPageToken: string | null }> {
+): Promise<{ processed: number; nextPageToken: string | null; committed: number; quarantined: number; fetchFailed: number }> {
   const maxMessagesPerChunk = options?.maxMessagesPerChunk ?? DEFAULT_MAX_MESSAGES_PER_CHUNK;
 
-  const run = await getOrCreateCaptureRun(db);
+  const run = await getOrCreateCaptureRun(db, userId);
 
   // backfillPageToken alone can't distinguish "backfill finished" from
   // "backfill never started" -- both leave it null. backfillCompletedAt
   // is the authoritative marker; once set, never contact Gmail again.
   if (run.backfillCompletedAt) {
-    return { processed: 0, nextPageToken: null };
+    return { processed: 0, nextPageToken: null, committed: 0, quarantined: 0, fetchFailed: 0 };
   }
 
   const currentToken = run.backfillPageToken ?? undefined;
@@ -162,8 +164,8 @@ export async function runBackfill(
         runStatus: "api_call_failed",
         errorType: err instanceof GmailApiError ? err.errorType : "unknown",
       })
-      .where(eq(captureRuns.id, run.id));
-    return { processed: 0, nextPageToken: resumeToken };
+      .where(and(eq(captureRuns.id, run.id), eq(captureRuns.userId, userId)));
+    return { processed: 0, nextPageToken: resumeToken, committed: 0, quarantined: 0, fetchFailed: 0 };
   }
 
   // Seeded once, on this row's very first-ever call, *before* the first
@@ -202,6 +204,7 @@ export async function runBackfill(
   const { rows: rowsToInsert, committedCount, quarantinedCount, fetchFailedCount } = await fetchAndBuildRows(
     db,
     client,
+    userId,
     messages.map((m) => m.id)
   );
 
@@ -219,7 +222,7 @@ export async function runBackfill(
       errorType: null,
       ...(seededPollingHistoryId !== undefined ? { pollingHistoryId: seededPollingHistoryId } : {}),
     })
-    .where(eq(captureRuns.id, run.id));
+    .where(and(eq(captureRuns.id, run.id), eq(captureRuns.userId, userId)));
 
   // Idempotent on gmail_message_id: a retried chunk that re-inserts an
   // already-committed message is a no-op, never a duplicate transaction.
@@ -272,7 +275,13 @@ export async function runBackfill(
     })
   );
 
-  return { processed: committedCount + quarantinedCount, nextPageToken: resolvedNextPageToken };
+  return {
+    processed: committedCount + quarantinedCount,
+    nextPageToken: resolvedNextPageToken,
+    committed: committedCount,
+    quarantined: quarantinedCount,
+    fetchFailed: fetchFailedCount,
+  };
 }
 
 /**
@@ -284,11 +293,12 @@ export async function runBackfill(
 export async function runOngoingPoll(
   db: DrizzleD1Database,
   client: GmailClient,
+  userId: number,
   options?: { maxMessagesPerChunk?: number }
 ): Promise<{ processed: number }> {
   const maxMessagesPerChunk = options?.maxMessagesPerChunk ?? DEFAULT_MAX_MESSAGES_PER_CHUNK;
 
-  const run = await getOrCreateCaptureRun(db);
+  const run = await getOrCreateCaptureRun(db, userId);
   const attemptedAt = new Date().toISOString();
 
   async function recordFailure(err: unknown) {
@@ -299,7 +309,7 @@ export async function runOngoingPoll(
         runStatus: "api_call_failed",
         errorType: err instanceof GmailApiError ? err.errorType : "unknown",
       })
-      .where(eq(captureRuns.id, run.id));
+      .where(and(eq(captureRuns.id, run.id), eq(captureRuns.userId, userId)));
     return { processed: 0 };
   }
 
@@ -314,7 +324,7 @@ export async function runOngoingPoll(
       await db
         .update(captureRuns)
         .set({ pollingHistoryId, lastAttemptedRun: attemptedAt, runStatus: "success", errorType: null })
-        .where(eq(captureRuns.id, run.id));
+        .where(and(eq(captureRuns.id, run.id), eq(captureRuns.userId, userId)));
       return { processed: 0 };
     } catch (err) {
       return recordFailure(err);
@@ -351,7 +361,7 @@ export async function runOngoingPoll(
             runStatus: "api_call_failed",
             errorType: "history_expired",
           })
-          .where(eq(captureRuns.id, run.id));
+          .where(and(eq(captureRuns.id, run.id), eq(captureRuns.userId, userId)));
         return { processed: 0 };
       } catch (reseedErr) {
         return recordFailure(reseedErr);
@@ -361,7 +371,7 @@ export async function runOngoingPoll(
   }
 
   const { rows: rowsToInsert, committedCount, quarantinedCount, fetchFailedCount, skippedCount } =
-    await fetchAndBuildRows(db, client, addedMessageIds, { enforceScope: true });
+    await fetchAndBuildRows(db, client, userId, addedMessageIds, { enforceScope: true });
 
   // If any message in this batch failed to fetch, do not advance the
   // watermark past it -- Gmail has no later page to bring it back on,
@@ -379,7 +389,7 @@ export async function runOngoingPoll(
       runStatus: "success",
       errorType: null,
     })
-    .where(eq(captureRuns.id, run.id));
+    .where(and(eq(captureRuns.id, run.id), eq(captureRuns.userId, userId)));
 
   const insertStatements = rowsToInsert.map((values) =>
     db

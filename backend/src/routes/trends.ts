@@ -1,3 +1,4 @@
+import { requireAuth } from "../middleware/auth";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { getMonthlyTrends, getTrendsHistory } from "../services/trendsService";
@@ -13,6 +14,7 @@ const MAX_HISTORY_MONTHS = 24;
 // [Phase 8 Task 5] Chained so `typeof trendsRoutes` carries every route's
 // schema -- see the identical fix/explanation in index.ts.
 export const trendsRoutes = new Hono<{ Bindings: Env }>()
+  .use(requireAuth)
   .get("/", async (c) => {
     const monthParam = c.req.query("month");
     const month = monthParam ?? new Date().toISOString().slice(0, 7);
@@ -22,7 +24,7 @@ export const trendsRoutes = new Hono<{ Bindings: Env }>()
     }
 
     const db = drizzle(c.env.DB);
-    const result = await getMonthlyTrends(db, month);
+    const result = await getMonthlyTrends(db, month, c.get("user").id);
     return c.json(result);
   })
   .get("/history", async (c) => {
@@ -34,6 +36,6 @@ export const trendsRoutes = new Hono<{ Bindings: Env }>()
     }
 
     const db = drizzle(c.env.DB);
-    const result = await getTrendsHistory(db, months);
+    const result = await getTrendsHistory(db, months, c.get("user").id);
     return c.json(result);
   });

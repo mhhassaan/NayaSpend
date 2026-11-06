@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { PageTransition } from "./PageTransition";
+import { Logo } from "./Logo";
+import { showError } from "./ToastProvider";
 import {
   BillsIcon,
   BudgetsIcon,
   CaptureHealthIcon,
   DashboardIcon,
   DedupIcon,
-  PlusIcon,
   TransactionsIcon,
 } from "./icons";
 
@@ -25,40 +27,53 @@ function navLinkClass({ isActive }: { isActive: boolean }) {
   }`;
 }
 
-// The one layout every page renders inside: a top bar (app name on the
-// left, a "Log transaction" quick action on the right) and a left
-// sidebar (desktop) / bottom tab bar (mobile) for nav between the primary
-// pages. Statement Upload and Log Missed Transaction are reached via
-// Dashboard's quick-action Tile grid, not this primary nav, per the
-// design doc's own page-layout pattern.
+// Shared layout with a desktop sidebar and mobile app-name bar and bottom
+// tabs for navigation between the primary pages. Transaction actions live
+// on the Transactions page and Dashboard's quick-action Tile grid.
 export function AppShell({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  async function signOut() {
+    try {
+      await fetch("/api/auth/google/logout", { method: "POST", credentials: "include" });
+    } catch {
+      showError("Couldn't sign out -- try again.");
+      return;
+    }
+    navigate("/login");
+  }
+
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="hidden w-60 flex-col gap-1 border-r border-mid-grey bg-bg-surface p-4 md:flex">
-        <div className="mb-4 px-3 font-display text-[20px] font-bold text-blackberry">NayaSpend</div>
+      <aside className="hidden w-60 flex-col gap-1 border-r border-mid-grey bg-bg-surface p-4 md:flex md:sticky md:top-0 md:h-screen md:overflow-y-auto">
+        <Logo variant="lockup" className="mb-4 px-3 text-[20px]" />
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to} className={navLinkClass} end={to === "/"}>
             <Icon />
             {label}
           </NavLink>
         ))}
+        <button
+          type="button"
+          onClick={signOut}
+          className="mt-auto flex items-center gap-3 rounded-md px-3 py-2 font-body text-[15px] font-medium text-text-secondary transition-colors hover:bg-silver-frost"
+        >
+          Sign out
+        </button>
       </aside>
 
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-mid-grey bg-bg-surface px-4 py-3 md:hidden">
-          <span className="font-display text-[18px] font-bold text-blackberry">NayaSpend</span>
-        </header>
-        <header className="hidden items-center justify-end border-b border-mid-grey bg-bg-surface px-6 py-3 md:flex">
-          <NavLink
-            to="/log-transaction"
-            className="flex items-center gap-2 rounded-md bg-blackberry px-4 py-2 font-body text-[15px] font-semibold text-hyper-white"
-          >
-            <PlusIcon />
-            Log transaction
-          </NavLink>
+          <Logo variant="lockup" className="text-[18px]" />
+          <button type="button" onClick={signOut} className="font-body text-[13px] font-medium text-text-secondary">
+            Sign out
+          </button>
         </header>
 
-        <main className="flex-1 p-4 pb-20 md:pb-4">{children}</main>
+        <main className="flex-1 p-4 pb-20 md:pb-4">
+          <PageTransition key={location.pathname}>{children}</PageTransition>
+        </main>
 
         <nav className="fixed inset-x-0 bottom-0 flex items-center justify-around border-t border-mid-grey bg-bg-surface py-2 md:hidden">
           {NAV_ITEMS.map(({ to, label, icon: Icon }) => (

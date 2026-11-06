@@ -59,15 +59,23 @@ export function parseNayaPayEmail(email: GmailMessage): ParsedEmailResult {
   }
   const amountCents = Math.round(amountValue * 100);
 
-  // Search for the vendor only after the matched amount, so an earlier
-  // greeting like "Welcome to NayaPay" can never be mistaken for the
-  // vendor the user actually spent money at.
-  const textAfterAmount = email.bodyText.slice((amountMatch.index ?? 0) + amountMatch[0].length);
-  const vendorMatch = textAfterAmount.match(VENDOR_PATTERN);
-  let vendorRaw = vendorMatch?.[1]?.trim();
+  // Prefer the "Merchant Details ... Merchant UIC" anchor when it's
+  // present -- it's the template's own authoritative merchant field.
+  // [Live-data fix] A real captured email showed every vendor parsed as
+  // "this email": the generic at/to scan below matched a boilerplate
+  // phrase (e.g. a "reply to this email" disclaimer) sitting in the body
+  // before the real Merchant Details section, so the more reliable anchor
+  // never got a chance to run. Trying it first sidesteps that regardless
+  // of the exact boilerplate wording.
+  const merchantMatch = email.bodyText.match(MERCHANT_DETAILS_PATTERN);
+  let vendorRaw = merchantMatch?.[1]?.replace(/\s+/g, " ").trim();
   if (!vendorRaw) {
-    const merchantMatch = email.bodyText.match(MERCHANT_DETAILS_PATTERN);
-    vendorRaw = merchantMatch?.[1]?.replace(/\s+/g, " ").trim();
+    // Search for the vendor only after the matched amount, so an earlier
+    // greeting like "Welcome to NayaPay" can never be mistaken for the
+    // vendor the user actually spent money at.
+    const textAfterAmount = email.bodyText.slice((amountMatch.index ?? 0) + amountMatch[0].length);
+    const vendorMatch = textAfterAmount.match(VENDOR_PATTERN);
+    vendorRaw = vendorMatch?.[1]?.trim();
   }
   if (!vendorRaw) {
     return { confidence: "low", reason: "unrecognized layout: no vendor found" };

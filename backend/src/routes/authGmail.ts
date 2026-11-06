@@ -5,6 +5,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { loadConfig } from "../config";
 import { gmailCredentials } from "../db/schema";
 import { decryptToken, encryptToken } from "../security";
+import { requireAuth, type AuthUser } from "../middleware/auth";
+import { validateSession } from "../services/sessionStore";
+import { randomNonce, signState, verifyState } from "../oauthState";
 
 type Env = {
   DB: D1Database;
@@ -19,79 +22,6 @@ type Env = {
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 const NONCE_COOKIE_NAME = "gmail_oauth_nonce";
 
-function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function randomNonce(): string {
-  return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(18)));
-}
-
-async function hmacSha256(message: string, base64Key: string): Promise<Uint8Array> {
-  const keyBytes = Uint8Array.from(atob(base64Key), (c) => c.charCodeAt(0));
-  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
-  return new Uint8Array(signature);
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
-/**
- * Stateless, time-boxed OAuth CSRF token -- no server-side session, no new
- * secret (reuses TOKEN_ENCRYPTION_KEY, already high-entropy and already a
- * Worker secret, purely as an HMAC key here, unrelated to its AES use in
- * security.ts).
- *
- * [Final review I2] An HMAC over just a timestamp proves only that this
- * server issued the state recently -- it says nothing about which browser
- * started the flow, since /connect is public and unauthenticated. Without
- * a browser binding, an attacker can run /connect themselves, consent
- * with their own Google account, and hand a victim (or the API directly)
- * a fully valid state+code pair that replaces the victim's Gmail
- * connection with the attacker's. Binding the state to a random nonce
- * that only travels in an HttpOnly cookie (double-submit pattern) ties
- * the state to the browser that received it, without any server-side
- * session storage.
- */
-export async function signState(timestampMs: number, nonce: string, key: string): Promise<string> {
-  const timestampPart = bytesToBase64Url(new TextEncoder().encode(String(timestampMs)));
-  const noncePart = bytesToBase64Url(new TextEncoder().encode(nonce));
-  const mac = await hmacSha256(`${timestampMs}.${nonce}`, key);
-  return `${timestampPart}.${noncePart}.${bytesToBase64Url(mac)}`;
-}
-
-async function verifyState(state: string, cookieNonce: string | undefined, key: string): Promise<boolean> {
-  if (!cookieNonce) return false;
-
-  const parts = state.split(".");
-  if (parts.length !== 3) return false;
-  const [timestampPart, noncePart, macPart] = parts;
-
-  let timestampMs: number;
-  let nonce: string;
-  try {
-    const padded = timestampPart.replace(/-/g, "+").replace(/_/g, "/");
-    timestampMs = Number(atob(padded));
-    nonce = new TextDecoder().decode(Uint8Array.from(atob(noncePart.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)));
-  } catch {
-    return false;
-  }
-  if (!Number.isFinite(timestampMs)) return false;
-  if (!timingSafeEqual(nonce, cookieNonce)) return false;
-
-  const expected = await signState(timestampMs, nonce, key);
-  if (!timingSafeEqual(expected, `${timestampPart}.${noncePart}.${macPart}`)) return false;
-
-  return Date.now() - timestampMs <= STATE_MAX_AGE_MS;
-}
-
 function consentUrl(clientId: string, redirectUri: string, state: string): string {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   url.searchParams.set("client_id", clientId);
@@ -104,7 +34,7 @@ function consentUrl(clientId: string, redirectUri: string, state: string): strin
   return url.toString();
 }
 
-async function redirectToConsent(c: Context<{ Bindings: Env }>) {
+async function redirectToConsent(c: Context<{ Bindings: Env; Variables: { user: AuthUser } }>) {
   const config = loadConfig(c.env);
   const nonce = randomNonce();
   const state = await signState(Date.now(), nonce, config.tokenEncryptionKey);
@@ -128,16 +58,16 @@ async function redirectToConsent(c: Context<{ Bindings: Env }>) {
 // the SPA's CaptureHealth page instead of returning a bare Worker
 // response, so the reconnect round trip (CaptureHealth -> Google -> back)
 // always lands the user back inside the app.
-function redirectToFrontend(c: Context<{ Bindings: Env }>, frontendBaseUrl: string, path: string) {
+function redirectToFrontend(c: Context<{ Bindings: Env; Variables: { user: AuthUser } }>, frontendBaseUrl: string, path: string) {
   c.header("Location", `${frontendBaseUrl}${path}`);
   return c.body(null, 302);
 }
 
 // [Phase 8 Task 5] Chained so `typeof authGmailRoutes` carries every
 // route's schema -- see the identical fix/explanation in index.ts.
-export const authGmailRoutes = new Hono<{ Bindings: Env }>()
-  .get("/connect", (c) => redirectToConsent(c))
-  .get("/reconnect", (c) => redirectToConsent(c))
+export const authGmailRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
+  .get("/connect", requireAuth, (c) => redirectToConsent(c))
+  .get("/reconnect", requireAuth, (c) => redirectToConsent(c))
   .get("/callback", async (c) => {
   const config = loadConfig(c.env);
   const toFrontend = (path: string) => redirectToFrontend(c, config.frontendBaseUrl, path);
@@ -147,6 +77,13 @@ export const authGmailRoutes = new Hono<{ Bindings: Env }>()
   if (!state || !(await verifyState(state, cookieNonce, config.tokenEncryptionKey))) {
     return toFrontend("/capture-health?error=invalid_state");
   }
+
+  const sessionToken = getCookie(c, "session");
+  const user = sessionToken ? await validateSession(drizzle(c.env.DB), sessionToken) : null;
+  if (!user) {
+    return toFrontend("/capture-health?error=not_authenticated");
+  }
+  const userId = user.id;
 
   const code = c.req.query("code");
   if (!code) {
@@ -187,7 +124,7 @@ export const authGmailRoutes = new Hono<{ Bindings: Env }>()
   }
 
   const db = drizzle(c.env.DB);
-  const [existing] = await db.select().from(gmailCredentials);
+  const [existing] = await db.select().from(gmailCredentials).where(eq(gmailCredentials.userId, userId));
 
   // Google omits refresh_token on some reconnects (it only issues a new
   // one when the user re-consents) -- keep the existing one rather than
@@ -211,7 +148,7 @@ export const authGmailRoutes = new Hono<{ Bindings: Env }>()
       .set({ encryptedAccessToken, encryptedRefreshToken, expiresAt })
       .where(eq(gmailCredentials.id, existing.id));
   } else {
-    await db.insert(gmailCredentials).values({ encryptedAccessToken, encryptedRefreshToken, expiresAt });
+    await db.insert(gmailCredentials).values({ userId, encryptedAccessToken, encryptedRefreshToken, expiresAt });
   }
 
   return toFrontend("/capture-health?connected=1");

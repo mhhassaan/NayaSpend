@@ -1,0 +1,106 @@
+.login-page {
+  position: relative;
+  isolation: isolate;
+  min-height: 100svh;
+  padding: max(28px, env(safe-area-inset-top, 0px))
+    max(24px, env(safe-area-inset-right, 0px))
+    max(24px, env(safe-area-inset-bottom, 0px))
+    max(24px, env(safe-area-inset-left, 0px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  color: #381d2a;
+}
+.login-stage {
+  width: 100%;
+  max-width: 1200px;
+  display: grid;
+  grid-template-columns: 145px minmax(0, 890px) 145px;
+  align-items: center;
+}
+.login-split {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1.08fr 1fr;
+  border: 1px solid #d9d2d5;
+  border-radius: 24px;
+  background: #fcf9fb;
+  box-shadow: 0 12px 35px #381d2a06;
+  overflow: hidden;
+}
+.login-signin {
+  grid-column: 2;
+  grid-row: 1;
+  padding: 36px 30px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 22px;
+  background: #fcf9fb;
+}
+.login-signin h1, .login-brand h2 {
+  font-size: 30px;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -.035em;
+}
+.login-page a { touch-action: manipulation; }
+.login-page a:focus-visible { outline: 3px solid #9048c4; outline-offset: 4px; }
+.login-cta { border-radius: 10px; padding: 12px 18px; }
+.login-brand {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  background: #ece8fd;
+  padding: 30px 26px;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+}
+.login-eyebrow { font-size: 12px; font-weight: 600; text-transform: uppercase; color: #9048c4; letter-spacing: .06em; }
+.login-brand h2 { font-family: Poppins, sans-serif; font-size: 29px; margin: 14px 0; }
+.login-brand-copy > .text-text-secondary { font-size: 14px; max-width: 290px; }
+.login-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.login-chips span { font-size: 10px; font-weight: 600; background: #fcf9fb; border-radius: 7px; padding: 7px 8px; color: #8c8085; }
+.login-small { font-size: 14px; margin-top: 14px; }
+.login-signoff { font-size: 12px; margin-top: 12px; }
+.login-ink-definitions { position: absolute; }
+.login-ink { display: block; width: 100%; height: auto; user-select: none; overflow: visible; }
+.login-ink-scene { margin: 0 auto; }
+.login-ink-trust { grid-column: 3; grid-row: 1; width: 154px; align-self: center; margin-top: 60px; }
+.login-ink-trend { grid-column: 1; grid-row: 1; width: 148px; align-self: end; margin-bottom: 10px; }
+@media (hover: hover) and (pointer: fine) {
+  .login-page a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  .login-cta:hover { background: #4a293b; }
+}
+@media (max-width: 1050px) and (min-width: 768px) {
+  .login-stage { grid-template-columns: 95px minmax(0, 1fr) 95px; }
+  .login-ink-trust, .login-ink-trend { width: 90px; }
+  .login-signin, .login-brand { padding: 28px 24px; }
+}
+@media (max-width: 767px) {
+  .login-page {
+    padding: max(16px, env(safe-area-inset-top, 0px))
+      max(16px, env(safe-area-inset-right, 0px))
+      max(20px, env(safe-area-inset-bottom, 0px))
+      max(16px, env(safe-area-inset-left, 0px));
+    align-items: flex-start;
+  }
+  .login-stage { display: flex; flex-wrap: wrap; gap: 20px 12px; align-items: flex-start; max-width: 460px; }
+  .login-split { display: contents; }
+  .login-signin { order: 0; padding: 28px 24px; gap: 20px; width: 100%; border: 1px solid #d9d2d5; border-radius: 20px; }
+  .login-ink-trust, .login-ink-trend { width: calc(50% - 6px); margin: 0; align-self: auto; }
+  .login-ink-trust { order: 1; }
+  .login-ink-trend { order: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-page *, .login-page *::before, .login-page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
+/* Colored liquid behind fluted glass fills the page; the card and ink figures sit on top. */
+.login-liquid { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; display: block; pointer-events: none; }

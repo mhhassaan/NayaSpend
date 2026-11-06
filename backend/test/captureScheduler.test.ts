@@ -1,6 +1,7 @@
+import { seedUserAndSession } from "./helpers/authedRequest";
 import { env } from "cloudflare:test";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { captureRuns } from "../src/db/schema";
 import { runCaptureScheduler } from "../src/services/captureScheduler";
 import { GmailApiError } from "../src/adapters/gmailClient";
@@ -32,6 +33,11 @@ function failingClient(): GmailClient {
   };
 }
 
+let userId: number;
+beforeEach(async () => {
+  ({ userId } = await seedUserAndSession(drizzle(env.DB)));
+});
+
 describe("runCaptureScheduler", () => {
   test("chooses runBackfill while backfill is not yet complete, and succeeds with no messages", async () => {
     const db = drizzle(env.DB);
@@ -47,7 +53,7 @@ describe("runCaptureScheduler", () => {
     };
     const queue = fakeQueue();
 
-    await runCaptureScheduler(db, client, queue);
+    await runCaptureScheduler(db, client, queue, userId);
 
     const [run] = await db.select().from(captureRuns);
     expect(run.runStatus).toBe("success");
@@ -57,7 +63,7 @@ describe("runCaptureScheduler", () => {
   test("chooses runOngoingPoll once backfill is complete", async () => {
     const db = drizzle(env.DB);
     const completedAt = new Date().toISOString();
-    await db.insert(captureRuns).values({
+    await db.insert(captureRuns).values({ userId,
       runStatus: "success",
       backfillCompletedAt: completedAt,
       pollingHistoryId: "100",
@@ -78,7 +84,7 @@ describe("runCaptureScheduler", () => {
     };
     const queue = fakeQueue();
 
-    await runCaptureScheduler(db, client, queue);
+    await runCaptureScheduler(db, client, queue, userId);
 
     expect(listHistoryCalled).toBe(true);
   });
@@ -87,33 +93,33 @@ describe("runCaptureScheduler", () => {
     const db = drizzle(env.DB);
     const queue = fakeQueue();
 
-    await runCaptureScheduler(db, failingClient(), queue);
+    await runCaptureScheduler(db, failingClient(), queue, userId);
 
     expect(queue.sent).toHaveLength(1);
     expect(queue.sent[0].delaySeconds).toBe(60);
-    expect(queue.sent[0].message).toEqual({ attempt: 2 });
+    expect(queue.sent[0].message).toEqual({ attempt: 2, userId });
   });
 
   test("retries at 5 minutes for attempt 2", async () => {
     const db = drizzle(env.DB);
     const queue = fakeQueue();
 
-    await runCaptureScheduler(db, failingClient(), queue, 2);
+    await runCaptureScheduler(db, failingClient(), queue, userId, 2);
 
     expect(queue.sent).toHaveLength(1);
     expect(queue.sent[0].delaySeconds).toBe(300);
-    expect(queue.sent[0].message).toEqual({ attempt: 3 });
+    expect(queue.sent[0].message).toEqual({ attempt: 3, userId });
   });
 
   test("retries at 15 minutes for the 3rd retry (attempt 4 = original + 3 retries), and does not enqueue a 5th attempt", async () => {
     const db = drizzle(env.DB);
     const queue3 = fakeQueue();
-    await runCaptureScheduler(db, failingClient(), queue3, 3);
+    await runCaptureScheduler(db, failingClient(), queue3, userId, 3);
     expect(queue3.sent).toHaveLength(1);
     expect(queue3.sent[0].delaySeconds).toBe(900);
 
     const queue4 = fakeQueue();
-    await runCaptureScheduler(db, failingClient(), queue4, 4);
+    await runCaptureScheduler(db, failingClient(), queue4, userId, 4);
     expect(queue4.sent).toHaveLength(0); // Watchdog takes over from here
 
     const [run] = await db.select().from(captureRuns);
@@ -134,7 +140,7 @@ describe("runCaptureScheduler", () => {
     };
     const queue = fakeQueue();
 
-    await runCaptureScheduler(db, client, queue);
+    await runCaptureScheduler(db, client, queue, userId);
 
     const [run] = await db.select().from(captureRuns);
     expect(run.runStatus).toBe("api_call_failed");
@@ -161,11 +167,22 @@ describe("runCaptureScheduler", () => {
     };
     const queue = fakeQueue();
 
-    await runCaptureScheduler(db, client, queue);
+    await runCaptureScheduler(db, client, queue, userId);
 
     expect(queue.sent).toHaveLength(0);
     const [run] = await db.select().from(captureRuns);
     expect(run.runStatus).toBe("api_call_failed");
     expect(run.errorType).toBe("auth_failure");
   });
+});
+
+test("[Review Focus] a retry queued by runCaptureScheduler carries the userId so the retry resumes for the correct user", async () => {
+  const db = drizzle(env.DB);
+  const other = await seedUserAndSession(db);
+  await db.insert(captureRuns).values({ userId: other.userId, runStatus: "success", backfillCompletedAt: new Date().toISOString() });
+  const queue = fakeQueue();
+  await runCaptureScheduler(db, failingClient(), queue, userId);
+  expect(queue.sent).toEqual([{ message: { attempt: 2, userId }, delaySeconds: 60 }]);
+  const rows = await db.select().from(captureRuns);
+  expect(rows.find(row => row.userId === other.userId)?.runStatus).toBe("success");
 });

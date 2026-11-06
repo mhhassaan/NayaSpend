@@ -131,7 +131,7 @@ function findPlainTextBody(payload: GmailMessagePart): string {
   const html: string[] = [];
   collectBodyParts(payload, plain, html);
 
-  if (plain.length > 0) return plain.join("\n");
+  if (plain.join("\n").trim().length > 0) return plain.join("\n");
   if (html.length > 0) return stripHtmlToText(html.join("\n"));
   return "";
 }

@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { LogMissedTransaction } from "./LogMissedTransaction";
@@ -20,7 +20,10 @@ describe("LogMissedTransaction", () => {
     await userEvent.type(screen.getByLabelText(/amount/i), "10.00");
     await userEvent.type(screen.getByLabelText(/date/i), "2026-11-01");
     await userEvent.click(screen.getByRole("button", { name: /log transaction/i }));
-    expect(await screen.findByText(/logged as coffee/i)).toBeInTheDocument();
+    const panel = await screen.findByRole("status");
+    expect(within(panel).getByText("Coffee")).toHaveClass("text-success");
+    expect(within(panel).getByTestId("success-icon")).toBeInTheDocument();
+    expect(panel).toHaveTextContent("Logged as");
     await vi.waitFor(() => expect(showSuccess).toHaveBeenCalledOnce());
   });
 
@@ -37,6 +40,9 @@ describe("LogMissedTransaction", () => {
     await userEvent.type(screen.getByLabelText(/date/i), "2026-11-01");
     await userEvent.click(screen.getByRole("button", { name: /log transaction/i }));
     expect(await screen.findByText(/amountCents must be a positive integer/i)).toBeInTheDocument();
+    const panel = screen.getByRole("alert");
+    expect(within(panel).getByTestId("error-icon")).toBeInTheDocument();
+    expect(within(panel).getByText("Failed")).toHaveClass("text-danger");
   });
 
   test("[break-ui] a non-Latin vendor name and a fractional amount round-trip without NaN", async () => {
@@ -48,10 +54,10 @@ describe("LogMissedTransaction", () => {
     await userEvent.type(screen.getByLabelText(/amount/i), "12345678.9");
     await userEvent.type(screen.getByLabelText(/date/i), "2026-11-01");
     await userEvent.click(screen.getByRole("button", { name: /log transaction/i }));
-    await screen.findByText(/logged as uncategorized/i);
+    await screen.findByText("Uncategorized");
     const [, init] = spy.mock.calls[0];
     const body = JSON.parse(init!.body as string);
-    expect(body.amountCents).toBe(1234567890);
+    expect(body.amountCents).toBe(-1234567890);
     expect(body.vendorRaw).toBe("نور الهدى عبد الرحمن");
   });
 
@@ -64,7 +70,48 @@ describe("LogMissedTransaction", () => {
     await userEvent.type(screen.getByLabelText(/amount/i), "10.00");
     await userEvent.type(screen.getByLabelText(/date/i), "2026-11-01");
     await userEvent.click(screen.getByRole("button", { name: /log transaction/i }));
-    await screen.findByText(/logged as coffee/i);
+    await screen.findByText("Coffee");
     expect(screen.getByLabelText(/vendor/i)).toHaveValue("");
   });
+});
+
+
+test("disables the submit button and shows a spinner until logging resolves", async () => {
+  let resolveRequest!: (response: Response) => void;
+  const response = new Promise<Response>((resolve) => { resolveRequest = resolve; });
+  const spy = mockFetch([{ test: urlContains("/api/missed-transactions", "POST"), respond: () => response }]);
+  renderWithProviders(<LogMissedTransaction />);
+  await userEvent.type(screen.getByLabelText(/vendor/i), "Store");
+  await userEvent.type(screen.getByLabelText(/amount/i), "10");
+  await userEvent.type(screen.getByLabelText(/date/i), "2026-11-01");
+  await userEvent.click(screen.getByRole("button", { name: "Log transaction" }));
+  const button = await screen.findByRole("button", { name: "Logging..." });
+  expect(button).toBeDisabled();
+  expect(within(button).getByTestId("pending-icon")).toHaveClass("animate-spin");
+  await userEvent.click(button);
+  expect(spy).toHaveBeenCalledTimes(1);
+  await act(async () => { resolveRequest(jsonResponse({ id: 1, category: "Coffee" }, 201)); });
+  expect(await screen.findByText("Coffee")).toHaveClass("text-success");
+  expect(screen.getByRole("button", { name: "Log transaction" })).toBeEnabled();
+  expect(screen.queryByTestId("pending-icon")).not.toBeInTheDocument();
+});
+
+
+test.each([
+  [null, "1559.13", -155913],
+  ["Money in", "1559.13", 155913],
+  [null, "-1559.13", -155913],
+  ["Money in", "-1559.13", 155913],
+] as const)("logging uses direction %s for typed magnitude %s", async (direction, typed, expected) => {
+  const spy = mockFetch([{ test: urlContains("/api/missed-transactions", "POST"), respond: () => jsonResponse({ id: 1, category: "Coffee" }, 201) }]);
+  renderWithProviders(<LogMissedTransaction />);
+  const toggle = within(screen.getByRole("group", { name: "Transaction direction" }));
+  expect(toggle.getByRole("button", { name: "Money out" })).toHaveAttribute("aria-pressed", "true");
+  if (direction) await userEvent.click(toggle.getByRole("button", { name: direction }));
+  await userEvent.type(screen.getByLabelText("Vendor"), "Store");
+  await userEvent.type(screen.getByLabelText("Amount"), typed);
+  await userEvent.type(screen.getByLabelText("Date"), "2026-11-01");
+  await userEvent.click(screen.getByRole("button", { name: "Log transaction" }));
+  await screen.findByText("Coffee");
+  expect(JSON.parse(spy.mock.calls[0][1]!.body as string).amountCents).toBe(expected);
 });

@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { captureRuns, gmailCredentials } from "../db/schema";
 import { sendNotification } from "./notificationEngine";
@@ -28,10 +29,11 @@ function reasonFor(run: { runStatus: string; errorType: string | null }): string
  */
 export async function checkCaptureHealth(
   db: DrizzleD1Database,
-  env: Partial<ConfigEnv>
+  env: Partial<ConfigEnv>,
+  userId: number
 ): Promise<{ escalated: boolean }> {
-  const [run] = await db.select().from(captureRuns);
-  const [credentials] = await db.select().from(gmailCredentials);
+  const [run] = await db.select().from(captureRuns).where(eq(captureRuns.userId, userId));
+  const [credentials] = await db.select().from(gmailCredentials).where(eq(gmailCredentials.userId, userId));
 
   // Nothing connected yet -- there is no job that should be running, so
   // silence is healthy, not an error.

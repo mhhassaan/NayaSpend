@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
 import { StatementUpload } from "./StatementUpload";
@@ -17,7 +17,8 @@ describe("StatementUpload", () => {
     const file = new File(["Date,Description,Amount\n2026-10-27,Starbucks,12.50"], "statement.csv", { type: "text/csv" });
     fireEvent.drop(screen.getByRole("region", { name: /statement file drop zone/i }), { dataTransfer: { files: [file] } });
     await userEvent.click(screen.getByRole("button", { name: /upload/i }));
-    expect(await screen.findByText("Imported 5 rows")).toBeInTheDocument();
+    expect(await screen.findByText("Imported 5 rows")).toHaveClass("text-success");
+    expect(within(screen.getByRole("status")).getByTestId("success-icon")).toBeInTheDocument();
     await vi.waitFor(() => expect(showSuccess).toHaveBeenCalledOnce());
   });
 
@@ -71,5 +72,34 @@ describe("StatementUpload", () => {
     await userEvent.upload(screen.getByLabelText(/choose file/i), file);
     await userEvent.click(screen.getByRole("button", { name: /upload/i }));
     expect(await screen.findByText(/no data rows to import/i)).toBeInTheDocument();
+    const panel = screen.getByRole("alert");
+    expect(within(panel).getByTestId("error-icon")).toBeInTheDocument();
+    expect(within(panel).getByText("Failed")).toHaveClass("text-danger");
   });
+});
+
+
+test("shows disabled importing feedback and advances illustrative steps while awaiting the response", async () => {
+  let resolveRequest!: (response: Response) => void;
+  const response = new Promise<Response>((resolve) => { resolveRequest = resolve; });
+  const spy = mockFetch([{ test: urlContains("/api/statements", "POST"), respond: () => response }]);
+  renderWithProviders(<StatementUpload />);
+  await userEvent.upload(screen.getByLabelText(/choose file/i), new File(["Date,Description,Amount"], "statement.csv", { type: "text/csv" }));
+  await userEvent.click(screen.getByRole("button", { name: "Upload" }));
+  const button = await screen.findByRole("button", { name: "Importing..." });
+  expect(button).toBeDisabled();
+  expect(within(button).getByTestId("pending-icon")).toHaveClass("animate-spin");
+  const steps = screen.getByRole("list", { name: "Import activity" });
+  expect(within(steps).getByText("Uploading").closest("li")).toHaveAttribute("aria-current", "step");
+  expect(within(steps).getByText("Parsing rows")).toBeInTheDocument();
+  expect(within(steps).getByText("Importing")).toBeInTheDocument();
+  await vi.waitFor(() => expect(within(steps).getByText("Importing").closest("li")).toHaveAttribute("aria-current", "step"), { timeout: 3000 });
+  expect(within(steps).getAllByTestId("step-complete-icon")).toHaveLength(2);
+  expect(button).toBeDisabled();
+  await userEvent.click(button);
+  expect(spy).toHaveBeenCalledTimes(1);
+  await act(async () => { resolveRequest(jsonResponse({ imported: 5 }, 201)); });
+  expect(await screen.findByText("Imported 5 rows")).toHaveClass("text-success");
+  expect(screen.getByRole("button", { name: "Upload" })).toBeEnabled();
+  expect(screen.queryByRole("list", { name: "Import activity" })).not.toBeInTheDocument();
 });

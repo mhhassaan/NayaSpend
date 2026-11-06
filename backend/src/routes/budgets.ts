@@ -1,6 +1,7 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { requireAuth, type AuthUser } from "../middleware/auth";
 import { budgets } from "../db/schema";
 
 type Env = {
@@ -13,10 +14,11 @@ function isPositiveInteger(value: unknown): value is number {
 
 // [Phase 8 Task 5] Chained so `typeof budgetsRoutes` carries every route's
 // schema -- see the identical fix/explanation in index.ts.
-export const budgetsRoutes = new Hono<{ Bindings: Env }>()
+export const budgetsRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
+  .use(requireAuth)
   .get("/", async (c) => {
     const db = drizzle(c.env.DB);
-    const rows = await db.select().from(budgets);
+    const rows = await db.select().from(budgets).where(eq(budgets.userId, c.get("user").id));
     return c.json(rows);
   })
   .post("/", async (c) => {
@@ -41,7 +43,7 @@ export const budgetsRoutes = new Hono<{ Bindings: Env }>()
   const db = drizzle(c.env.DB);
   const [row] = await db
     .insert(budgets)
-    .values({ category, limitAmount: body.limitAmount, periodType: body.periodType })
+    .values({ userId: c.get("user").id, category, limitAmount: body.limitAmount, periodType: body.periodType })
     .returning();
 
   return c.json(row, 201);
@@ -49,7 +51,7 @@ export const budgetsRoutes = new Hono<{ Bindings: Env }>()
   .patch("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
-  const [row] = await db.select().from(budgets).where(eq(budgets.id, id));
+  const [row] = await db.select().from(budgets).where(and(eq(budgets.id, id), eq(budgets.userId, c.get("user").id)));
   if (!row) {
     return c.text("not found", 404);
   }
@@ -82,18 +84,18 @@ export const budgetsRoutes = new Hono<{ Bindings: Env }>()
     updates.periodType = body.periodType;
   }
 
-  await db.update(budgets).set(updates).where(eq(budgets.id, id));
-  const [updated] = await db.select().from(budgets).where(eq(budgets.id, id));
+  await db.update(budgets).set(updates).where(and(eq(budgets.id, id), eq(budgets.userId, c.get("user").id)));
+  const [updated] = await db.select().from(budgets).where(and(eq(budgets.id, id), eq(budgets.userId, c.get("user").id)));
   return c.json(updated);
   })
   .delete("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(c.env.DB);
-  const [row] = await db.select().from(budgets).where(eq(budgets.id, id));
+  const [row] = await db.select().from(budgets).where(and(eq(budgets.id, id), eq(budgets.userId, c.get("user").id)));
   if (!row) {
     return c.text("not found", 404);
   }
 
-  await db.delete(budgets).where(eq(budgets.id, id));
+  await db.delete(budgets).where(and(eq(budgets.id, id), eq(budgets.userId, c.get("user").id)));
     return c.body(null, 204);
   });

@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { requireAuth, type AuthUser } from "../middleware/auth";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { captureRuns } from "../db/schema";
@@ -11,10 +13,11 @@ type Env = ConfigEnv & {
 
 // [Phase 8 Task 5] Chained so `typeof captureRoutes` carries every route's
 // schema -- see the identical fix/explanation in index.ts.
-export const captureRoutes = new Hono<{ Bindings: Env }>()
+export const captureRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUser } }>()
+  .use(requireAuth)
   .get("/health", async (c) => {
     const db = drizzle(c.env.DB);
-    const [run] = await db.select().from(captureRuns);
+    const [run] = await db.select().from(captureRuns).where(eq(captureRuns.userId, c.get("user").id));
 
     if (!run) {
       // A brand-new, never-run installation is a normal state the frontend's
@@ -31,12 +34,12 @@ export const captureRoutes = new Hono<{ Bindings: Env }>()
   })
   .post("/backfill", async (c) => {
     const db = drizzle(c.env.DB);
-    const client = await getGmailClient(db, c.env);
+    const client = await getGmailClient(db, c.env, c.get("user").id);
 
     if (!client) {
       return c.text("No Gmail account connected", 409);
     }
 
-    const result = await runBackfill(db, client);
+    const result = await runBackfill(db, client, c.get("user").id);
     return c.json(result);
   });

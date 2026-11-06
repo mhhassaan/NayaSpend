@@ -4,7 +4,35 @@ import {
   integer,
   sqliteTable,
   text,
+  unique,
 } from "drizzle-orm/sqlite-core";
+
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  email: text("email").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  avatarUrl: text("avatar_url"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const authIdentities = sqliteTable("auth_identities", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  provider: text("provider").notNull(),
+  providerAccountId: text("provider_account_id").notNull(),
+  passwordHash: text("password_hash"),
+  createdAt: text("created_at").notNull(),
+}, (table) => ({
+  providerAccountUnique: unique().on(table.provider, table.providerAccountId),
+}));
+
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+  userAgent: text("user_agent"),
+});
 
 // Canonical transaction model (design doc: Technical Plan -> Canonical
 // Transaction model). `amount` is an integer in minor units (cents) --
@@ -12,6 +40,7 @@ import {
 // SQLite's dynamic typing won't do it for us.
 export const transactions = sqliteTable("transactions", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
   amount: integer("amount").notNull(),
   date: text("date").notNull(),
   vendorRaw: text("vendor_raw").notNull(),
@@ -46,6 +75,7 @@ export const transactions = sqliteTable("transactions", {
 
 export const captureRuns = sqliteTable("capture_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
   lastAttemptedRun: text("last_attempted_run"),
   lastSuccessfulRun: text("last_successful_run"),
   // One of: success | job_did_not_run | api_call_failed
@@ -63,19 +93,29 @@ export const captureRuns = sqliteTable("capture_runs", {
 
 export const gmailCredentials = sqliteTable("gmail_credentials", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
   encryptedAccessToken: text("encrypted_access_token").notNull(),
   encryptedRefreshToken: text("encrypted_refresh_token").notNull(),
   expiresAt: text("expires_at").notNull(),
-});
+}, (table) => ({
+  userIdUnique: unique().on(table.userId),
+}));
 
 export const categoryRules = sqliteTable("category_rules", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  vendorNormalized: text("vendor_normalized").notNull().unique(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  // Not globally unique -- two different users saving a correction for
+  // the same vendor string (e.g. both shopping at "Starbucks") must not
+  // collide. Uniqueness is per (userId, vendorNormalized) instead.
+  vendorNormalized: text("vendor_normalized").notNull(),
   category: text("category").notNull(),
-});
+}, (table) => ({
+  vendorPerUserUnique: unique().on(table.userId, table.vendorNormalized),
+}));
 
 export const budgets = sqliteTable("budgets", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
   category: text("category").notNull(),
   limitAmount: integer("limit_amount").notNull(),
   periodType: text("period_type").notNull(),
@@ -90,6 +130,7 @@ export const budgets = sqliteTable("budgets", {
 
 export const bills = sqliteTable("bills", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
   vendor: text("vendor").notNull(),
   expectedAmount: integer("expected_amount").notNull(),
   expectedInterval: text("expected_interval").notNull(),

@@ -1,0 +1,20 @@
+export function InkTrust() {
+  return (
+    <svg className="login-ink login-ink-trust pointer-events-none" data-testid="login-decoration-trust" aria-hidden="true" focusable="false" viewBox="0 0 260 205">
+      <g fill="none" stroke="#381d2a" strokeLinecap="round" strokeLinejoin="round" filter="url(#login-ink-roughen)">
+      <path d="M124 75 Q160 65 193 73 L197 131 Q164 143 126 134 Z" fill="#ffc6d4" strokeWidth="0"/>
+      <path d="M120 70 Q154 65 189 69 L193 128 Q155 137 122 130 Z" fill="none" strokeWidth="2.4"/>
+      <path d="M122 73 L154 97 Q159 100 165 94 L188 72 M123 126 L145 103 M191 124 L172 103" fill="none" strokeWidth="1.6"/>
+      <path d="M141 67 L140 49 Q142 24 164 27 Q182 29 182 48 L182 55 M150 65 L149 49 Q151 37 161 37 Q173 38 173 49" fill="none" strokeWidth="3"/>
+      <path d="M57 90 Q49 80 55 69 Q65 60 75 68 Q80 80 72 90" fill="#fcf9fb" strokeWidth="2.1"/>
+      <path d="M53 78 Q47 65 60 61 Q72 59 79 71 L75 78 Q66 72 60 81 Z" fill="#381d2a" strokeWidth="2.1"/>
+      <path d="M57 91 Q40 106 44 137 L74 145 L86 119 L111 117 L126 111 Q131 104 125 102 L119 107 L113 103 Q107 103 107 109 L81 107 L70 93" fill="#fcf9fb" strokeWidth="2.5"/>
+      <path d="M49 107 L71 113 M47 115 L74 123 M48 124 L71 133 M49 133 L68 138" fill="none" strokeWidth="1.6"/>
+      <path d="M48 140 L42 179 L53 180 L63 151 L74 178 L86 177 L77 144" fill="#381d2a" strokeWidth="2.8"/>
+      <path d="M42 178 L37 185 L57 185 L56 180 M74 177 L72 184 L93 184 M103 149 L165 144 L169 164 L107 170 Z M111 156 Q134 152 159 151" fill="none" strokeWidth="1.7"/>
+      <text x="115" y="163" fill="#381d2a" stroke="none" fontSize="10" fontFamily="DM Sans, sans-serif" transform="rotate(-5 115 163)">read only</text>
+      <path d="M146 13 L145 6 M194 32 L204 26 M201 42 L213 41 M27 190 Q70 187 103 191" fill="none" strokeWidth="1.6"/>
+      </g>
+      </svg>
+  );
+}

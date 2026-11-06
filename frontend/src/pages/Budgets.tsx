@@ -1,7 +1,9 @@
+import { CategorySelect } from "../components/CategorySelect";
+import { BudgetsEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import { Button, Card, EmptyState, Modal, StatDisplay, showError, showSuccess } from "../components";
+import { Button, Card, EmptyState, ListReveal, Modal, StatDisplay, showError, showSuccess } from "../components";
 import type { Budget } from "../types/transaction";
 import { formatCents, parseRupeesToCents } from "../utils/money";
 
@@ -21,8 +23,8 @@ function spentFor(category: string, trends: MonthlyTrends): number {
   return trends.byCategory.find((c) => c.category === category)?.totalCents ?? 0;
 }
 
-function CreateBudgetForm({ onDone }: { onDone: () => void }) {
-  const [category, setCategory] = useState("");
+function CreateBudgetForm({ onDone, extraCategories }: { onDone: () => void; extraCategories: string[] }) {
+  const [category, setCategory] = useState("Uncategorized");
   const [limit, setLimit] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -48,11 +50,9 @@ function CreateBudgetForm({ onDone }: { onDone: () => void }) {
 
   function handleSave() {
     const limitAmount = parseRupeesToCents(limit);
-    // Mirrors the backend's own validation message (budgets.ts) so the
-    // inline error reads the same whether it came from this client-side
-    // check or a server rejection.
+    // Client-side pre-submit check for a positive limit.
     if (!Number.isInteger(limitAmount) || limitAmount <= 0) {
-      setClientError("limitAmount must be a positive integer");
+      setClientError("Enter a limit greater than zero.");
       return;
     }
     setClientError(null);
@@ -63,17 +63,12 @@ function CreateBudgetForm({ onDone }: { onDone: () => void }) {
     <div className="flex flex-col gap-3">
       <label className="flex flex-col gap-1">
         <span className="font-body text-[13px] font-semibold text-text-secondary">Category</span>
-        <input
-          aria-label="Category"
-          className="rounded-sm border border-mid-grey px-3 py-2"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-        />
+        <CategorySelect aria-label="Category" value={category} onChange={setCategory} extraCategories={extraCategories} />
       </label>
       <label className="flex flex-col gap-1">
         <span className="font-body text-[13px] font-semibold text-text-secondary">Limit (Rs.)</span>
         <input
-          aria-label="Limit"
+          aria-label="Limit" placeholder="e.g. 10000"
           type="text"
           inputMode="numeric"
           className="rounded-sm border border-mid-grey px-3 py-2"
@@ -273,18 +268,18 @@ export function Budgets() {
 
       {creating && (
         <Card>
-          <CreateBudgetForm onDone={() => setCreating(false)} />
+          <CreateBudgetForm onDone={() => setCreating(false)} extraCategories={budgetsList.map(budget => budget.category)} />
         </Card>
       )}
 
       {budgetsList.length === 0 ? (
-        <EmptyState message="No budgets yet." />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {budgetsList.map((b) => (
-            <BudgetRow key={b.id} budget={b} trends={trends} />
-          ))}
+        <div className="flex min-h-[55vh] items-center justify-center">
+          <EmptyState icon={<BudgetsEmptyIllustration />} message="No budgets yet." />
         </div>
+      ) : (
+        <ListReveal items={budgetsList.map((b) => (
+            <BudgetRow key={b.id} budget={b} trends={trends} />
+          ))} />
       )}
     </div>
   );
