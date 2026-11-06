@@ -25,6 +25,32 @@ beforeEach(async () => {
 });
 
 describe("getMonthlyTrends", () => {
+  test("returns the single largest spend's raw vendor and negative amount", async () => {
+    const db = drizzle(env.DB);
+    await seed(db, { amount: -5000, vendorRaw: "Coffee shop" });
+    await seed(db, { amount: -20000, vendorRaw: "Imtiaz" });
+    await seed(db, { amount: -8000, vendorRaw: "Petrol" });
+    await seed(db, { amount: 90000, vendorRaw: "Salary" });
+    await seed(db, { amount: -100000, date: "2026-09-30", vendorRaw: "Other month" });
+    await seed(db, { amount: -100000, reviewStatus: "pending_review" });
+    await seed(db, { amount: -100000, deletedAt: new Date().toISOString() });
+    await seed(db, { amount: -100000, dedupResolution: "pending", dedupGroupId: "g1" });
+    const other = await seedUserAndSession(db);
+    await seed(db, { amount: -100000, userId: other.userId });
+
+    expect((await getMonthlyTrends(db, "2026-10", userId)).biggestPurchase)
+      .toEqual({ vendorRaw: "Imtiaz", amountCents: -20000 });
+  });
+
+  test("returns no biggest purchase for a month with only inflows", async () => {
+    const db = drizzle(env.DB);
+    await seed(db, { amount: 20000 });
+    expect((await getMonthlyTrends(db, "2026-10", userId)).biggestPurchase).toBeNull();
+  });
+
+  test("returns no biggest purchase for a month with zero transactions", async () => {
+    expect((await getMonthlyTrends(drizzle(env.DB), "2026-10", userId)).biggestPurchase).toBeNull();
+  });
   test("sums committed transactions by category for the given month", async () => {
     const db = drizzle(env.DB);
     await seed(db, { amount: -5000, category: "Coffee" });
@@ -134,6 +160,6 @@ test("[Review Focus] getMonthlyTrends/getTrendsHistory never include another use
   await seed(db, { userId: other.userId, date: `${month}-05`, amount: -9000, category: "Other" });
   await seed(db, { userId: other.userId, date: `${month}-06`, amount: 8000 });
   const expected = { month, spentCents: 1000, receivedCents: 2000, byCategory: [{ category: "Coffee", totalCents: 1000 }], hasData: true };
-  expect(await getMonthlyTrends(db, month, userId)).toEqual(expected);
+  expect(await getMonthlyTrends(db, month, userId)).toEqual({ ...expected, biggestPurchase: { vendorRaw: "x", amountCents: -1000 } });
   expect(await getTrendsHistory(db, 1, userId)).toEqual({ months: [expected] });
 });

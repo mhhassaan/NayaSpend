@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, useReducedMotion } from "motion/react";
 import { apiClient } from "../api/client";
-import { Card, EmptyState, Pill, StatDisplay, Tile, showError } from "../components";
+import { Button, Card, EmptyState, Pill, StatDisplay, Tile, showError } from "../components";
+import { ShareRecapModal } from "../components/ShareRecapModal";
 import { BillsIcon, BudgetsIcon, StatementUploadIcon, TransactionsIcon } from "../components/icons";
 import { HeroIllustration, MonthEmptyIllustration, HistoryEmptyIllustration } from "../components/illustrations";
 
@@ -15,9 +16,10 @@ type MonthlyTrends = {
   receivedCents: number;
   byCategory: { category: string; totalCents: number }[];
   hasData: boolean;
+  biggestPurchase: { vendorRaw: string; amountCents: number } | null;
 };
 
-type TrendsHistory = { months: MonthlyTrends[] };
+type TrendsHistory = { months: Omit<MonthlyTrends, "biggestPurchase">[] };
 
 function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
@@ -31,6 +33,7 @@ function shiftMonth(month: string, delta: number): string {
 
 export function Dashboard() {
   const [month, setMonth] = useState(currentMonth());
+  const [shareOpen, setShareOpen] = useState(false);
   const reduceMotion = useReducedMotion();
 
   const monthQuery = useQuery({
@@ -115,6 +118,7 @@ export function Dashboard() {
     : new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
   const categories = [...monthData.byCategory].sort((a, b) => b.totalCents - a.totalCents);
   const monthlySpentCents = monthData.spentCents;
+  const net = monthData.receivedCents - monthlySpentCents;
 
   return (
       <div className="flex flex-col gap-6">
@@ -144,12 +148,17 @@ export function Dashboard() {
         ) : (
           <>
         <div className="flex flex-wrap items-end gap-6">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col items-start gap-3">
             <StatDisplay label={`Spend for ${monthData.month}`} value={formatCents(monthlySpentCents)} />
             {delta !== null && (
               <Pill tone={delta > 0 ? "warning" : "success"}>
                 {`${delta > 0 ? "\u25b2" : "\u25bc"} ${Math.max(1, Math.round(Math.abs(delta)))}% vs ${previousMonthName}`}
               </Pill>
+            )}
+            {monthData.hasData && categories.length > 0 && (
+              <p className="font-body text-[15px] text-text-secondary">
+                Most of this went to <strong className="text-text-primary">{categories[0].category}</strong> ({monthlySpentCents > 0 ? Math.round(categories[0].totalCents / monthlySpentCents * 100) : 0}%)
+              </p>
             )}
           </div>
           {monthData.hasData && monthlySpentCents > 0 && (
@@ -158,7 +167,21 @@ export function Dashboard() {
           {monthData.receivedCents > 0 && (
             <StatDisplay label="Received" value={formatCents(monthData.receivedCents)} />
           )}
+          {monthData.hasData && (
+            <Button variant="secondary" className="sm:ml-auto" onClick={() => setShareOpen(true)}>Share your month</Button>
+          )}
         </div>
+
+        {monthData.hasData && (
+          <Card aria-label="Net position" className={`border font-body ${net >= 0 ? "border-vivid-violet bg-light-purple text-blackberry" : "border-danger/20 bg-danger/10 text-danger"}`}>
+            <p className="font-semibold">
+              {net >= 0
+                ? `You kept ${formatCents(net)} this month`
+                : `You spent ${formatCents(Math.abs(net))} more than you received this month`}
+            </p>
+            <p className="mt-1 text-[13px]">Received minus spent{monthData.receivedCents > 0 && net >= 0 ? ` / ${Math.round(net / monthData.receivedCents * 100)}% of money in` : ""}</p>
+          </Card>
+        )}
 
         <div className="grid grid-cols-4 gap-3">
           <Tile icon={<TransactionsIcon />} label="Log transaction" onClick={() => (window.location.href = "/log-transaction")} />
@@ -195,7 +218,10 @@ export function Dashboard() {
                   <div key={c.category} className="flex flex-col gap-2">
                     <div className="flex items-center justify-between gap-3">
                       <Pill>{c.category}</Pill>
-                      <span className="font-body text-[15px] font-semibold">{formatCents(c.totalCents)}</span>
+                      <span className="flex items-baseline gap-2 font-body">
+                        <span className="text-[15px] font-semibold">{formatCents(c.totalCents)}</span>
+                        <span className="text-[12px] text-text-secondary">{Math.round(share)}%</span>
+                      </span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-xl bg-mid-grey">
                       <motion.div
@@ -243,19 +269,37 @@ export function Dashboard() {
           {historyData.months.every((m) => !m.hasData) ? (
             <EmptyState message="No statement imported for this account yet." icon={<HistoryEmptyIllustration />} />
           ) : (
-            <div data-testid="trends-history-chart" className="flex items-end gap-2" style={{ height: 120 }}>
-              {historyData.months.map((m) => (
+            <div data-testid="trends-history-chart" className="flex items-end gap-2" style={{ height: 145 }}>
+              {historyData.months.map((m) => {
+                const rupees = m.spentCents / 100;
+                const valueLabel = rupees >= 1000 ? `${(rupees / 1000).toFixed(1)}k` : String(rupees);
+                return (
                 <div key={m.month} className="flex flex-1 flex-col items-center gap-1" title={m.month}>
+                  <span className="font-body text-[11px] text-text-secondary">{valueLabel}</span>
                   <div
                     className="w-full rounded-t-sm bg-accent"
                     style={{ height: `${Math.max(2, (m.spentCents / maxHistoryTotal) * 100)}px` }}
                   />
                   <span className="font-body text-[11px] text-text-secondary">{m.month.slice(5)}</span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>
+        {monthData.hasData && monthData.biggestPurchase && (
+          <p className="font-body text-[15px] text-text-secondary">
+            <strong className="text-text-primary">A purchase that stood out</strong> / Biggest single purchase: <strong className="text-text-primary">{formatCents(Math.abs(monthData.biggestPurchase.amountCents))} at {monthData.biggestPurchase.vendorRaw}</strong>
+          </p>
+        )}
+        <ShareRecapModal
+          key={month}
+          open={shareOpen && monthData.hasData}
+          onClose={() => setShareOpen(false)}
+          month={monthData.month}
+          spentCents={monthlySpentCents}
+          byCategory={categories}
+        />
       </div>
   );
 }

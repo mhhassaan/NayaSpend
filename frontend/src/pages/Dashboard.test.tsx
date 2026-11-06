@@ -78,7 +78,7 @@ describe("Dashboard", () => {
       },
     ]);
     renderWithProviders(<Dashboard />);
-    expect(await screen.findByText("Coffee")).toBeInTheDocument();
+    expect(await screen.findByText("Coffee", { selector: "span" })).toBeInTheDocument();
     expect(screen.getByTestId("trends-history-chart")).toBeInTheDocument();
   });
 
@@ -132,9 +132,11 @@ describe("Dashboard", () => {
 
 
 describe("Dashboard spending insights", () => {
-  function setup({ history = [], total = 12000, categories = [{ category: "Coffee", totalCents: total }], budgets }: {
+  function setup({ history = [], total = 12000, received = 0, biggestPurchase = null, categories = [{ category: "Coffee", totalCents: total }], budgets }: {
     history?: { month: string; spentCents: number }[];
     total?: number;
+    received?: number;
+    biggestPurchase?: { vendorRaw: string; amountCents: number } | null;
     categories?: { category: string; totalCents: number }[];
     budgets?: { category: string; limitAmount: number }[];
   } = {}) {
@@ -144,13 +146,66 @@ describe("Dashboard spending insights", () => {
     previousDate.setUTCMonth(previousDate.getUTCMonth() - 1);
     const previous = previousDate.toISOString().slice(0, 7);
     const fetch = mockFetch([
-      { test: urlContains("/api/trends?"), respond: () => jsonResponse({ month, spentCents: total, receivedCents: 0, byCategory: categories, hasData: total > 0 }) },
+      { test: urlContains("/api/trends?"), respond: () => jsonResponse({ month, spentCents: total, receivedCents: received, biggestPurchase, byCategory: categories, hasData: total > 0 }) },
       { test: urlContains("/api/trends/history"), respond: () => jsonResponse({ months: history.map((entry) => ({ ...entry, byCategory: [], hasData: true })) }) },
       ...(budgets ? [{ test: urlContains("/api/budgets"), respond: () => jsonResponse(budgets.map((b, id) => ({ ...b, id, periodType: "monthly", lastAlertedThreshold: null, lastAlertedPeriodStart: null }))) }] : []),
     ]);
     renderWithProviders(<Dashboard />);
     return { month, previous, fetch };
   }
+
+  test("names the largest category and its rounded share under the hero", async () => {
+    setup({ total: 30000, categories: [{ category: "Coffee", totalCents: 10000 }, { category: "Rent", totalCents: 20000 }] });
+    const insight = await screen.findByText(/Most of this went to/);
+    expect(insight).toHaveTextContent("Most of this went to Rent (67%)");
+    expect(within(insight).getByText("Rent").tagName).toBe("STRONG");
+  });
+
+  test("Share your month opens the currently viewed recap in private mode", async () => {
+    setup({ total: 30000, categories: [{ category: "Coffee", totalCents: 30000 }] });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Share your month" }));
+    const modal = screen.getByRole("dialog");
+    expect(within(modal).getByRole("button", { name: "Percentages only" })).toHaveAttribute("aria-pressed", "true");
+    const label = new Date().toLocaleString("en", { month: "long", year: "numeric", timeZone: "UTC" });
+    expect(within(modal).getByText(`${label} / My spending recap`)).toBeInTheDocument();
+    expect(within(modal).getByLabelText("Spending recap").textContent).not.toContain("Rs");
+    await userEvent.click(within(modal).getByRole("button", { name: "With amounts" }));
+    expect(within(modal).getByLabelText("Spending recap")).toHaveTextContent("Rs. 300.00");
+  });
+
+  test.each([20000, 12000])("uses kept wording and purple tone for nonnegative net with income %i", async (received) => {
+    setup({ received });
+    const text = await screen.findByText(`You kept Rs. ${((received - 12000) / 100).toFixed(2)} this month`);
+    expect(text.closest('[aria-label="Net position"]')).toHaveClass("bg-light-purple", "border-vivid-violet");
+  });
+
+  test("uses spent-more wording and danger tone for negative net", async () => {
+    setup({ received: 2000 });
+    const text = await screen.findByText("You spent Rs. 100.00 more than you received this month");
+    expect(text.closest('[aria-label="Net position"]')).toHaveClass("text-danger", "bg-danger/10");
+  });
+
+  test("places the biggest single purchase after the history chart", async () => {
+    setup({ biggestPurchase: { vendorRaw: "Imtiaz", amountCents: -425000 } });
+    const text = await screen.findByText(/Biggest single purchase:/);
+    expect(text).toHaveTextContent("Biggest single purchase: Rs. 4,250.00 at Imtiaz");
+    expect(screen.getByText("Last 6 months").compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("omits the outlier when biggestPurchase is null", async () => {
+    setup();
+    await screen.findByText("Last 6 months");
+    expect(screen.queryByText(/Biggest single purchase:/)).not.toBeInTheDocument();
+  });
+
+  test.each([false, true])("omits all glance insights in an empty month (returning: %s)", async (returning) => {
+    setup({ total: 0, received: 20000, categories: [], history: returning ? [{ month: "2026-01", spentCents: 100 }] : [], biggestPurchase: { vendorRaw: "Hidden", amountCents: -100 } });
+    await screen.findByText(/no spending recorded yet/i);
+    expect(screen.queryByText(/Most of this went to/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Net position")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Biggest single purchase:/)).not.toBeInTheDocument();
+  });
 
   test.each([ [12000, "\u25b2 20%"], [8000, "\u25bc 20%"] ])("shows a month-over-month delta for %i cents", async (total, badge) => {
     const now = new Date();
@@ -166,7 +221,7 @@ describe("Dashboard spending insights", () => {
     const month = now.toISOString().slice(0, 7);
     const previous = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
     setup({ history: [ ...(condition === "missing current" ? [] : [{ month, spentCents: 12000 }]), ...(condition === "missing" ? [] : [{ month: previous, spentCents: condition === "zero" ? 0 : 12000 }]) ] });
-    await screen.findByText("Coffee");
+    await screen.findByText("Coffee", { selector: "span" });
     expect(screen.queryByText(/% vs /)).not.toBeInTheDocument();
   });
 
@@ -221,7 +276,7 @@ describe("Dashboard spending insights", () => {
 
   test("omits the Received stat when the month has no income", async () => {
     setup();
-    await screen.findByText("Coffee");
+    await screen.findByText("Coffee", { selector: "span" });
     expect(screen.queryByText("Received")).not.toBeInTheDocument();
   });
 
@@ -233,6 +288,29 @@ describe("Dashboard spending insights", () => {
       expect(bars[0]).toHaveStyle({ width: "80%" });
       expect(bars[1]).toHaveStyle({ width: "20%" });
     });
+  });
+
+  test("shows a rounded percentage beside each category amount", async () => {
+    setup({ total: 30000, categories: [{ category: "Coffee", totalCents: 10000 }, { category: "Rent", totalCents: 20000 }] });
+    const category = await screen.findByText("Coffee", { selector: "span" });
+    const row = within(category.parentElement!);
+    expect(row.getByText("Rs. 100.00")).toBeInTheDocument();
+    expect(row.getByText("33%")).toHaveClass("text-text-secondary", "text-[12px]");
+  });
+
+  test.each([
+    [4250000, "42.5k"],
+    [100000, "1.0k"],
+    [42500, "425"],
+    [99999, "999.99"],
+    [0, "0"],
+  ])("labels a history bar above it using rupees for %i cents", async (spentCents, label) => {
+    setup({ history: [{ month: "2026-05", spentCents }] });
+    const chart = await screen.findByTestId("trends-history-chart");
+    const value = within(chart).getByText(label);
+    expect(value).toHaveClass("text-[11px]", "text-text-secondary");
+    expect(value.nextElementSibling).toHaveClass("bg-accent");
+    expect(value.parentElement!.lastElementChild).toHaveTextContent("05");
   });
 
   test("renders budgets with spent, limits, percentages and threshold tones", async () => {
@@ -247,7 +325,7 @@ describe("Dashboard spending insights", () => {
 
   test("silently omits budgets when the optional request has no mock", async () => {
     const { fetch } = setup();
-    await screen.findByText("Coffee");
+    await screen.findByText("Coffee", { selector: "span" });
     await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).includes("/api/budgets"))).toBe(true));
     expect(screen.queryByText("Budgets at a glance")).not.toBeInTheDocument();
     expect(showError).not.toHaveBeenCalled();
@@ -266,7 +344,7 @@ describe("Dashboard spending insights", () => {
 
   test("omits budgets when none exist", async () => {
     setup({ budgets: [] });
-    await screen.findByText("Coffee");
+    await screen.findByText("Coffee", { selector: "span" });
     expect(screen.queryByText("Budgets at a glance")).not.toBeInTheDocument();
   });
 });

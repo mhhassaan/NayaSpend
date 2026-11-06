@@ -141,7 +141,7 @@ export async function runBackfill(
   client: GmailClient,
   userId: number,
   options?: { maxMessagesPerChunk?: number }
-): Promise<{ processed: number; nextPageToken: string | null }> {
+): Promise<{ processed: number; nextPageToken: string | null; committed: number; quarantined: number; fetchFailed: number }> {
   const maxMessagesPerChunk = options?.maxMessagesPerChunk ?? DEFAULT_MAX_MESSAGES_PER_CHUNK;
 
   const run = await getOrCreateCaptureRun(db, userId);
@@ -150,7 +150,7 @@ export async function runBackfill(
   // "backfill never started" -- both leave it null. backfillCompletedAt
   // is the authoritative marker; once set, never contact Gmail again.
   if (run.backfillCompletedAt) {
-    return { processed: 0, nextPageToken: null };
+    return { processed: 0, nextPageToken: null, committed: 0, quarantined: 0, fetchFailed: 0 };
   }
 
   const currentToken = run.backfillPageToken ?? undefined;
@@ -165,7 +165,7 @@ export async function runBackfill(
         errorType: err instanceof GmailApiError ? err.errorType : "unknown",
       })
       .where(and(eq(captureRuns.id, run.id), eq(captureRuns.userId, userId)));
-    return { processed: 0, nextPageToken: resumeToken };
+    return { processed: 0, nextPageToken: resumeToken, committed: 0, quarantined: 0, fetchFailed: 0 };
   }
 
   // Seeded once, on this row's very first-ever call, *before* the first
@@ -275,7 +275,13 @@ export async function runBackfill(
     })
   );
 
-  return { processed: committedCount + quarantinedCount, nextPageToken: resolvedNextPageToken };
+  return {
+    processed: committedCount + quarantinedCount,
+    nextPageToken: resolvedNextPageToken,
+    committed: committedCount,
+    quarantined: quarantinedCount,
+    fetchFailed: fetchFailedCount,
+  };
 }
 
 /**

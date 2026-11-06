@@ -22,10 +22,11 @@ describe("trends routes", () => {
     const res = await trendsRoutes.request("/?month=2026-10", { headers: { Cookie: cookie } }, env);
 
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { spentCents: number; receivedCents: number; hasData: boolean };
+    const body = (await res.json()) as { spentCents: number; receivedCents: number; hasData: boolean; biggestPurchase: { vendorRaw: string; amountCents: number } | null };
     expect(body.spentCents).toBe(5000);
     expect(body.receivedCents).toBe(0);
     expect(body.hasData).toBe(true);
+    expect(body.biggestPurchase).toEqual({ vendorRaw: "x", amountCents: -5000 });
   });
 
   test("GET / with no month param defaults to the current month", async () => {

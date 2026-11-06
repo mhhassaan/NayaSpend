@@ -1,8 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
-import { Button, Card, SidePanelLayout, showError, showSuccess } from "../components";
-import { StatementUploadIcon } from "../components/icons";
+import { Button, Card, Pill, SidePanelLayout, showError, showSuccess } from "../components";
+import { CheckIcon, SpinnerIcon, StatementUploadIcon } from "../components/icons";
+
+import { MutationFeedback } from "../components/MutationFeedback";
+import { useReducedMotion } from "motion/react";
 
 const ACCEPTED_CONTENT_TYPES = new Set(["text/csv", "text/plain", "application/vnd.ms-excel"]);
 
@@ -15,6 +18,8 @@ function looksLikeCsv(file: File): boolean {
 }
 
 export function StatementUpload() {
+  const reduceMotion = useReducedMotion();
+  const [activeStep, setActiveStep] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,7 +53,16 @@ export function StatementUpload() {
     },
   });
 
+  useEffect(() => {
+    if (!mutation.isPending) return;
+    setActiveStep(0);
+    // Illustrative activity only: the RPC exposes no per-stage progress.
+    const interval = window.setInterval(() => setActiveStep((step) => Math.min(step + 1, 2)), 700);
+    return () => window.clearInterval(interval);
+  }, [mutation.isPending]);
+
   function handleUpload() {
+    if (mutation.isPending) return;
     setResult(null);
     setServerError(null);
     if (!file) {
@@ -117,16 +131,46 @@ export function StatementUpload() {
               </div>
             )}
 
-            {clientError && <p className="font-body text-[13px] text-danger">{clientError}</p>}
-            {serverError && <p className="break-words font-body text-[13px] text-danger">{serverError}</p>}
+            {clientError && (
+              <MutationFeedback tone="danger">
+                <Pill tone="danger">Check file</Pill>
+                <p className="mt-2">{clientError}</p>
+              </MutationFeedback>
+            )}
+            {serverError && (
+              <MutationFeedback tone="danger">
+                <Pill tone="danger">Failed</Pill>
+                <p className="mt-2">{serverError}</p>
+              </MutationFeedback>
+            )}
             {result && (
-              <p className="font-body text-[13px] text-success">
-                Imported {result.imported} row{result.imported === 1 ? "" : "s"}
-              </p>
+              <MutationFeedback tone="success">
+                <Pill tone="success">Imported {result.imported} row{result.imported === 1 ? "" : "s"}</Pill>
+              </MutationFeedback>
             )}
 
-            <Button variant="primary" onClick={handleUpload}>
-              Upload
+            {mutation.isPending && (
+              <div className="rounded-lg border border-border p-4">
+                <p className="mb-3 font-body text-[13px] text-text-secondary">Import activity</p>
+                <ol aria-label="Import activity" className="flex items-start">
+                  {["Uploading", "Parsing rows", "Importing"].map((label, index) => (
+                    <li key={label} aria-current={activeStep === index ? "step" : undefined}
+                      className={`flex min-w-0 flex-1 flex-col gap-2 font-body text-[13px] ${index <= activeStep ? "text-accent" : "text-text-secondary"}`}>
+                      <div className="flex items-center">
+                        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border ${index <= activeStep ? "border-accent bg-accent text-hyper-white" : "border-border"}`}>
+                          {index < activeStep ? <CheckIcon data-testid="step-complete-icon" aria-hidden="true" width={18} height={18} /> : index + 1}
+                        </span>
+                        {index < 2 && <span aria-hidden="true" className={`h-px flex-1 ${index < activeStep ? "bg-accent" : "bg-border"}`} />}
+                      </div>
+                      <span>{label}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+            <Button variant="primary" onClick={handleUpload} disabled={mutation.isPending} className="flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-60">
+              {mutation.isPending && <SpinnerIcon data-testid="pending-icon" aria-hidden="true" className={reduceMotion ? "" : "animate-spin"} />}
+              {mutation.isPending ? "Importing..." : "Upload"}
             </Button>
           </div>
         </Card>

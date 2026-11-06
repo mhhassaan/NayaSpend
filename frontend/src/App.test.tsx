@@ -1,3 +1,4 @@
+import { beforeAll, afterAll, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider, type RouteObject } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -37,4 +38,25 @@ describe("App routing", () => {
     renderAt("/");
     expect(document.body).toBeInTheDocument();
   });
+});
+
+test("welcome renders the public landing page outside AppShell", () => {
+  renderAt("/welcome");
+  expect(screen.getByRole("heading", { level: 1, name: /Spending happens.*Clarity follows/ })).toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: /primary/i })).not.toBeInTheDocument();
+});
+
+// jsdom has no viewport observer; keep Motion real and provide its browser API.
+beforeAll(() => vi.stubGlobal("IntersectionObserver", class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}));
+afterAll(() => vi.unstubAllGlobals());
+
+test.each([["/terms", "Terms of Service"], ["/privacy", "Privacy Policy"]])("%s is public and outside AppShell", (path, heading) => {
+  renderAt(path);
+  expect(screen.getByRole("heading", { level: 1, name: heading })).toBeInTheDocument();
+  expect(screen.queryByRole("navigation", { name: /primary/i })).not.toBeInTheDocument();
+  expect(routes.find((route) => route.path === path)).toBeDefined();
 });

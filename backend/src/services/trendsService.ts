@@ -9,18 +9,23 @@ export type MonthlyTrends = {
   receivedCents: number;
   byCategory: { category: string; totalCents: number }[];
   hasData: boolean;
+  biggestPurchase: { vendorRaw: string; amountCents: number } | null;
 };
 
 export async function getMonthlyTrends(db: DrizzleD1Database, month: string, userId: number): Promise<MonthlyTrends> {
   const rows = await db
-    .select({ category: transactions.category, amount: transactions.amount })
+    .select({ category: transactions.category, amount: transactions.amount, vendorRaw: transactions.vendorRaw })
     .from(transactions)
     .where(and(eq(transactions.userId, userId), like(transactions.date, `${month}%`), committedNotPendingDedup()));
 
   const totals = new Map<string, number>();
   let receivedCents = 0;
+  let biggestPurchase: MonthlyTrends["biggestPurchase"] = null;
   for (const row of rows) {
     if (row.amount < 0) {
+      if (biggestPurchase === null || row.amount < biggestPurchase.amountCents) {
+        biggestPurchase = { vendorRaw: row.vendorRaw, amountCents: row.amount };
+      }
       totals.set(row.category, (totals.get(row.category) ?? 0) - row.amount);
     } else if (row.amount > 0) {
       receivedCents += row.amount;
@@ -30,7 +35,7 @@ export async function getMonthlyTrends(db: DrizzleD1Database, month: string, use
   const byCategory = Array.from(totals, ([category, totalCents]) => ({ category, totalCents }));
   const spentCents = byCategory.reduce((sum, c) => sum + c.totalCents, 0);
 
-  return { month, spentCents, receivedCents, byCategory, hasData: byCategory.length > 0 };
+  return { month, spentCents, receivedCents, byCategory, hasData: byCategory.length > 0, biggestPurchase };
 }
 
 function shiftMonth(year: number, month0: number, delta: number): { year: number; month0: number } {
@@ -52,7 +57,7 @@ export async function getTrendsHistory(
   db: DrizzleD1Database,
   monthsCount: number,
   userId: number
-): Promise<{ months: MonthlyTrends[] }> {
+): Promise<{ months: Omit<MonthlyTrends, "biggestPurchase">[] }> {
   const now = new Date();
   const currentYear = now.getUTCFullYear();
   const currentMonth0 = now.getUTCMonth();

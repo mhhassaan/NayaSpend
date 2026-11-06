@@ -10,6 +10,9 @@ import { StatementUpload } from "./pages/StatementUpload";
 import { Budgets } from "./pages/Budgets";
 import { Bills } from "./pages/Bills";
 import { CaptureHealth } from "./pages/CaptureHealth";
+import { Landing } from "./pages/Landing";
+import { Terms } from "./pages/Terms";
+import { Privacy } from "./pages/Privacy";
 import { Login } from "./pages/Login";
 
 // Plain data, no router instance created here -- `createBrowserRouter`
@@ -23,7 +26,7 @@ import { Login } from "./pages/Login";
 // against the already-stable shell/404/error-boundary structure built in
 // this task.
 //
-// [Phase 8 Task 12] `/login` is a sibling of the AppShell-rooted route,
+// [Phase 8 Task 12] `/login`, `/welcome`, `/terms` and `/privacy` are siblings of the AppShell-rooted route,
 // not a child of it, so it never goes through the auth guard main.tsx
 // wraps that route's element in -- a route tests build their own router
 // from (see App.test.tsx) sees this exact plain structure, unauthenticated
@@ -49,5 +52,8 @@ export const routes: RouteObject[] = [
       { path: "*", element: <NotFound /> },
     ],
   },
+  { path: "/welcome", element: <Landing /> },
   { path: "/login", element: <Login /> },
+  { path: "/terms", element: <Terms /> },
+  { path: "/privacy", element: <Privacy /> },
 ];

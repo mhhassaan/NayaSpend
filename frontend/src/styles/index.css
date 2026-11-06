@@ -34,6 +34,14 @@ body {
   background-color: var(--color-deep-grey);
 }
 
+/* Reserve the scrollbar's lane up front so content doesn't reflow when a
+   scrollbar appears/disappears, and let the page scroll smoothly for any
+   in-page anchor/programmatic scrolls. */
+html {
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
+}
+
 /* Tints native form controls (date/time pickers, checkboxes, radios,
    range sliders) with the brand accent instead of the browser's default
    blue -- the one part of native control chrome every browser lets us

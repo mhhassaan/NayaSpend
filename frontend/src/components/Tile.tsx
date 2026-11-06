@@ -6,18 +6,17 @@ type TileProps = {
   onClick?: () => void;
 };
 
-// radius-lg square-ish tile with a centered icon and a text-label caption
-// below -- matches NayaPay's in-app service-tile grid pattern. Used for
-// any settings/action grid (Dashboard's quick-action Tile grid).
+// Horizontal quick action for the Dashboard.
 export function Tile({ icon, label, onClick }: TileProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex flex-col items-center gap-2 rounded-lg bg-bg-surface p-4 shadow-[var(--shadow-sm)] transition-transform active:scale-[0.96]"
+      className="flex items-center gap-3 rounded-md border border-mid-grey bg-bg-surface px-3.5 py-4 text-left transition-transform active:scale-[0.96]"
     >
-      <span className="flex h-8 w-8 items-center justify-center text-accent">{icon}</span>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center text-accent">{icon}</span>
       <span className="font-body text-[13px] font-semibold text-text-secondary">{label}</span>
+      <span aria-hidden="true" className="ml-auto shrink-0">-&gt;</span>
     </button>
   );
 }

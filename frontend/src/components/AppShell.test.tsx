@@ -4,6 +4,23 @@ import { describe, expect, test } from "vitest";
 import { AppShell } from "./AppShell";
 
 describe("AppShell", () => {
+  test("renders the logo mark beside both wordmarks", () => {
+    const { container } = render(<MemoryRouter><AppShell><div /></AppShell></MemoryRouter>);
+    for (const region of ["aside", "header"]) {
+      expect(container.querySelector(`${region} svg[viewBox="0 0 64 64"]`)).toBeInTheDocument();
+    }
+    expect(screen.getAllByText("NayaSpend")).toHaveLength(2);
+  });
+
+  test("keeps the desktop sidebar within the viewport with its own overflow scrolling", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AppShell><div /></AppShell>
+      </MemoryRouter>
+    );
+    expect(container.querySelector("aside")).toHaveClass("md:sticky", "md:top-0", "md:h-screen", "md:overflow-y-auto");
+  });
+
   test("renders its children at a non-root route", () => {
     render(
       <MemoryRouter initialEntries={["/transactions"]}>

@@ -57,6 +57,44 @@ describe("parseNayaPayEmail", () => {
     }
   });
 
+  // [Live-data regression] A real captured email had a "reply to this
+  // email" disclaimer sitting between the amount and the Merchant Details
+  // section -- the old at/to scan matched "this email" there and never
+  // reached the real merchant name below. Every vendor parsed that way in
+  // production.
+  test("[Live-data regression] a disclaimer sentence between the amount and Merchant Details is not mistaken for the vendor", () => {
+    const result = parseNayaPayEmail({
+      ...realWorldSpendEmail,
+      bodyText: [
+        "Your transaction was successful",
+        "KHAYABAN PHARMACYY",
+        "Lahore PK",
+        "Online Transaction",
+        "04 Nov 2026, 07:26 PM",
+        "- Rs. 2,471",
+        "AMOUNT DETAILS",
+        "Amount Paid Rs. 2,471",
+        "Service Fee (Incl. Tax) Rs. 0",
+        "Total Amount Rs. 2,471",
+        "If you did not authorize this transaction, please reply to this email within 24 hours.",
+        "TRANSACTION DETAILS",
+        "Transaction ID 896508",
+        "ADDITIONAL INFORMATION",
+        "Card Visa ●●●●8978",
+        "Acquiring Bank -",
+        "Merchant Category Drug Stores and Pharmacies",
+        "Merchant Details KHAYABAN PHARMACYY",
+        "Lahore PK",
+        "Merchant UIC 726995912573887",
+      ].join("\n"),
+    });
+    expect(result.confidence).toBe("high");
+    if (result.confidence === "high") {
+      expect(result.vendorRaw).toContain("KHAYABAN PHARMACYY");
+      expect(result.vendorRaw).not.toContain("this email");
+    }
+  });
+
   test("a 'PKR 1250' amount with no decimal point still parses to 125000 cents", () => {
     const result = parseNayaPayEmail({
       ...pkrFormatEmail,
@@ -205,6 +243,7 @@ describe("runBackfill", () => {
 
     expect(result.processed).toBe(1);
     expect(result.nextPageToken).toBeNull();
+    expect(result).toMatchObject({ committed: 1, quarantined: 0, fetchFailed: 0 });
     const rows = await db.select().from(transactions);
     expect(rows).toHaveLength(1);
     expect(rows[0].source).toBe("gmail_email");
@@ -219,8 +258,9 @@ describe("runBackfill", () => {
       { "m-promo": promoEmailNoAmount }
     );
 
-    await runBackfill(db, client, userId);
+    const result = await runBackfill(db, client, userId);
 
+    expect(result).toMatchObject({ committed: 0, quarantined: 1, fetchFailed: 0 });
     const rows = await db.select().from(transactions);
     expect(rows).toHaveLength(1);
     expect(rows[0].reviewStatus).toBe("pending_review");
@@ -321,6 +361,7 @@ describe("runBackfill", () => {
     const result = await runBackfill(db, client, userId);
 
     expect(result.processed).toBe(1); // only m-pkr succeeded
+    expect(result).toMatchObject({ committed: 1, quarantined: 0, fetchFailed: 1 });
     const rows = await db.select().from(transactions);
     expect(rows).toHaveLength(1);
     expect(rows[0].vendorNormalized).toBe("daraz online store");

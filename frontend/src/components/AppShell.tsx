@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { PageTransition } from "./PageTransition";
+import { Logo } from "./Logo";
 import { showError } from "./ToastProvider";
 import {
   BillsIcon,
@@ -45,8 +46,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="hidden w-60 flex-col gap-1 border-r border-mid-grey bg-bg-surface p-4 md:flex">
-        <div className="mb-4 px-3 font-display text-[20px] font-bold text-blackberry">NayaSpend</div>
+      <aside className="hidden w-60 flex-col gap-1 border-r border-mid-grey bg-bg-surface p-4 md:flex md:sticky md:top-0 md:h-screen md:overflow-y-auto">
+        <Logo variant="lockup" className="mb-4 px-3 text-[20px]" />
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to} className={navLinkClass} end={to === "/"}>
             <Icon />
@@ -64,7 +65,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="flex flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-mid-grey bg-bg-surface px-4 py-3 md:hidden">
-          <span className="font-display text-[18px] font-bold text-blackberry">NayaSpend</span>
+          <Logo variant="lockup" className="text-[18px]" />
           <button type="button" onClick={signOut} className="font-body text-[13px] font-medium text-text-secondary">
             Sign out
           </button>

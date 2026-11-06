@@ -21,7 +21,7 @@ export function EmptyState({ icon, message, actionLabel, onAction }: EmptyStateP
       transition={{ duration: reduceMotion ? 0 : 0.2 }}
     >
       <div className="flex flex-col items-center gap-4 p-8 text-center">
-        {icon}
+        {icon && <div className="[&>svg]:h-44 [&>svg]:w-auto [&>svg]:max-w-full">{icon}</div>}
         <p className="font-body text-[18px] text-text-secondary">{message}</p>
         {actionLabel && onAction && (
           <Button variant="primary" onClick={onAction}>

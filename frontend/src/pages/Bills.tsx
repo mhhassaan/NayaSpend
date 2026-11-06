@@ -305,7 +305,9 @@ export function Bills() {
       )}
 
       {billsList.length === 0 ? (
-        <EmptyState icon={<BillsEmptyIllustration />} message="No bills yet." />
+        <div className="flex min-h-[55vh] items-center justify-center">
+          <EmptyState icon={<BillsEmptyIllustration />} message="No bills yet." />
+        </div>
       ) : (
         <ListReveal items={billsList.map((b) => (
             <BillRow key={b.id} bill={b} />

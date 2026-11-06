@@ -40,6 +40,7 @@ describe("Budgets", () => {
     renderWithProviders(<Budgets />);
     expect(await screen.findByRole("button", { name: /create budget/i })).toBeInTheDocument();
     expect(await screen.findByText(/no budgets yet/i)).toBeInTheDocument();
+    expect((await screen.findByText("No budgets yet.")).closest(".min-h-\\[55vh\\]")).toHaveClass("items-center", "justify-center");
   });
 
   test("creating a budget with a non-positive limit is rejected client-side with a plain-language message", async () => {
@@ -49,7 +50,7 @@ describe("Budgets", () => {
     ]);
     renderWithProviders(<Budgets />);
     await userEvent.click(await screen.findByRole("button", { name: /create budget/i }));
-    await userEvent.type(screen.getByLabelText(/category/i), "Rent");
+    await userEvent.selectOptions(screen.getByLabelText(/category/i), "Groceries");
     await userEvent.type(screen.getByLabelText(/limit/i), "0");
     await userEvent.click(screen.getByRole("button", { name: /save/i }));
     expect(await screen.findByText(/enter a limit greater than zero/i)).toBeInTheDocument();
@@ -64,7 +65,7 @@ describe("Budgets", () => {
     ]);
     renderWithProviders(<Budgets />);
     await userEvent.click(await screen.findByRole("button", { name: /create budget/i }));
-    await userEvent.type(screen.getByLabelText(/category/i), "Rent");
+    await userEvent.selectOptions(screen.getByLabelText(/category/i), "Groceries");
     await userEvent.type(screen.getByLabelText(/limit/i), "5000");
     await userEvent.click(screen.getByRole("button", { name: /save/i }));
     await vi.waitFor(() => {
@@ -72,6 +73,7 @@ describe("Budgets", () => {
       expect(postCall).toBeDefined();
       const body = JSON.parse(postCall![1]!.body as string);
       expect(body.limitAmount).toBe(500000);
+      expect(body.category).toBe("Groceries");
     });
   });
 
@@ -110,4 +112,15 @@ describe("Budgets", () => {
     await vi.waitFor(() => expect(showSuccess).toHaveBeenCalledOnce());
     expect(spy.mock.calls.some(([url, init]) => String(url).includes("/api/budgets/1") && init?.method === "DELETE")).toBe(true);
   });
+});
+
+test("budget creation offers custom categories from loaded budgets", async () => {
+  mockFetch([
+    { test: urlContains("/api/budgets", "GET"), respond: () => jsonResponse([{ id: 1, category: "Coffee", limitAmount: 10000, periodType: "monthly" }]) },
+    { test: urlContains("/api/trends", "GET"), respond: () => jsonResponse(trendsResponse()) },
+  ]);
+  renderWithProviders(<Budgets />);
+  await userEvent.click(await screen.findByRole("button", { name: /create budget/i }));
+  await userEvent.selectOptions(screen.getByLabelText("Category"), "Coffee");
+  expect(screen.getByLabelText("Category")).toHaveValue("Coffee");
 });

@@ -6,6 +6,7 @@ describe("EmptyState", () => {
   test("renders a passed-in icon node", () => {
     render(<EmptyState icon={<svg data-testid="my-icon" />} message="x" />);
     expect(screen.getByTestId("my-icon")).toBeInTheDocument();
+    expect(screen.getByTestId("my-icon").parentElement).toHaveClass("[&>svg]:h-44", "[&>svg]:w-auto");
   });
 
   test("renders its message and an optional action button", () => {

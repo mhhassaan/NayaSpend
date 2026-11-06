@@ -197,6 +197,35 @@ describe("createGmailClient", () => {
     expect(message.bodyText).not.toContain("<br");
   });
 
+  test("getMessage falls back to the HTML part when the text/plain part exists but is blank/whitespace-only", async () => {
+    const fetchSpy = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          id: "m5",
+          threadId: "t5",
+          internalDate: "1730000000000",
+          payload: {
+            headers: [],
+            mimeType: "multipart/alternative",
+            parts: [
+              { mimeType: "text/plain", body: { data: base64url(" ") } },
+              { mimeType: "text/html", body: { data: base64url("<div>Amount Paid<br/>Rs. 2,471</div>") } },
+            ],
+          },
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const client = createGmailClient("fake-access-token");
+    const message = await client.getMessage("m5");
+
+    expect(message.bodyText).toContain("Amount Paid");
+    expect(message.bodyText).toContain("Rs. 2,471");
+    expect(message.bodyText).not.toContain("<div>");
+  });
+
   test("listHistory calls users.history.list with startHistoryId and returns added message ids + new watermark", async () => {
     const fetchSpy = vi.fn(async (url: string) => {
       expect(url).toContain("startHistoryId=100");

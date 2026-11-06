@@ -1,3 +1,4 @@
+import { CategorySelect } from "../components/CategorySelect";
 import { BudgetsEmptyIllustration } from "../components/illustrations";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,8 +23,8 @@ function spentFor(category: string, trends: MonthlyTrends): number {
   return trends.byCategory.find((c) => c.category === category)?.totalCents ?? 0;
 }
 
-function CreateBudgetForm({ onDone }: { onDone: () => void }) {
-  const [category, setCategory] = useState("");
+function CreateBudgetForm({ onDone, extraCategories }: { onDone: () => void; extraCategories: string[] }) {
+  const [category, setCategory] = useState("Uncategorized");
   const [limit, setLimit] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -62,12 +63,7 @@ function CreateBudgetForm({ onDone }: { onDone: () => void }) {
     <div className="flex flex-col gap-3">
       <label className="flex flex-col gap-1">
         <span className="font-body text-[13px] font-semibold text-text-secondary">Category</span>
-        <input
-          aria-label="Category" placeholder="e.g. Groceries"
-          className="rounded-sm border border-mid-grey px-3 py-2"
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-        />
+        <CategorySelect aria-label="Category" value={category} onChange={setCategory} extraCategories={extraCategories} />
       </label>
       <label className="flex flex-col gap-1">
         <span className="font-body text-[13px] font-semibold text-text-secondary">Limit (Rs.)</span>
@@ -272,12 +268,14 @@ export function Budgets() {
 
       {creating && (
         <Card>
-          <CreateBudgetForm onDone={() => setCreating(false)} />
+          <CreateBudgetForm onDone={() => setCreating(false)} extraCategories={budgetsList.map(budget => budget.category)} />
         </Card>
       )}
 
       {budgetsList.length === 0 ? (
-        <EmptyState icon={<BudgetsEmptyIllustration />} message="No budgets yet." />
+        <div className="flex min-h-[55vh] items-center justify-center">
+          <EmptyState icon={<BudgetsEmptyIllustration />} message="No budgets yet." />
+        </div>
       ) : (
         <ListReveal items={budgetsList.map((b) => (
             <BudgetRow key={b.id} budget={b} trends={trends} />

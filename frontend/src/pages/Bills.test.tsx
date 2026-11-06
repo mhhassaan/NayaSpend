@@ -36,6 +36,7 @@ describe("Bills", () => {
     mockFetch([{ test: urlContains("/api/bills", "GET"), respond: () => jsonResponse([]) }]);
     renderWithProviders(<Bills />);
     expect(await screen.findByRole("button", { name: /add bill/i })).toBeInTheDocument();
+    expect((await screen.findByText("No bills yet.")).closest(".min-h-\\[55vh\\]")).toHaveClass("items-center", "justify-center");
   });
 
   test("creating a bill with a malformed due date is rejected client-side", async () => {
