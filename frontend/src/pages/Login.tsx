@@ -1,4 +1,5 @@
 import { Logo } from "../components/Logo";
+import { FlutedLiquid } from "../components/FlutedLiquid";
 import { InkDefinitions } from "../components/ink/InkDefinitions";
 import { InkScene } from "../components/ink/InkScene";
 import { InkTrend } from "../components/ink/InkTrend";
@@ -9,6 +10,7 @@ import "./Login.css";
 export function Login() {
   return (
     <main className="login-page bg-bg-page">
+      <FlutedLiquid className="login-liquid" />
       <InkDefinitions />
       <div className="login-stage">
         <div className="login-split">

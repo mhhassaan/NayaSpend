@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useReducedMotion } from "motion/react";
 import { Logo } from "../components/Logo";
+import Lenis from "lenis";
 import { Scene, HeroInk } from "../components/landing/Scenes";
+import { CountUp } from "../components/landing/CountUp";
 import { FriendlyArrowSymbol } from "../components/landing/FriendlyArrowSymbol";
 import { Mascot } from "../components/landing/Mascot";
 import "./Landing.css";
@@ -53,30 +55,74 @@ export function Landing() {
     };
   }, [reduceMotion]);
 
+  // Inertial smooth scrolling (Lenis): the page eases to a stop instead of halting instantly.
+  useEffect(() => {
+    if (reduceMotion || typeof window === "undefined" || typeof window.matchMedia !== "function" || typeof ResizeObserver === "undefined" || typeof requestAnimationFrame === "undefined") return;
+    const lenis = new Lenis({ lerp: 0.09, wheelMultiplier: 1, anchors: { offset: -96 } });
+    let frame = requestAnimationFrame(function raf(time) { lenis.raf(time); frame = requestAnimationFrame(raf); });
+    return () => { cancelAnimationFrame(frame); lenis.destroy(); };
+  }, [reduceMotion]);
+
+  // Spending bars fill when they scroll into view.
+  useLayoutEffect(() => {
+    const page = root.current;
+    if (!page || reduceMotion || typeof IntersectionObserver === "undefined") return;
+    page.classList.add("anim");
+    const observer = new IntersectionObserver(entries => entries.forEach(entry => {
+      if (entry.isIntersecting) { entry.target.classList.add("filled"); observer.unobserve(entry.target); }
+    }), { threshold: 0.6 });
+    page.querySelectorAll(".bar").forEach(el => observer.observe(el));
+    return () => { observer.disconnect(); page.classList.remove("anim"); };
+  }, [reduceMotion]);
+
+  // The closing card widens to the full page width as it scrolls into view; its button then nudges for attention.
+  useEffect(() => {
+    const finale = root.current?.querySelector<HTMLElement>(".finale");
+    if (!finale) return;
+    if (reduceMotion) { finale.style.setProperty("--p", "1"); return; }
+    let ticking = false;
+    const update = () => {
+      ticking = false;
+      const top = finale.getBoundingClientRect().top;
+      const p = Math.min(1, Math.max(0, (window.innerHeight - top) / (window.innerHeight * 0.6)));
+      finale.style.setProperty("--p", String(p));
+    };
+    const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+    update();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    let observer: IntersectionObserver | undefined;
+    if (typeof IntersectionObserver !== "undefined") {
+      observer = new IntersectionObserver(entries => entries.forEach(entry => finale.classList.toggle("in-view", entry.isIntersecting)), { threshold: 0.55 });
+      observer.observe(finale.querySelector(".closing") ?? finale);
+    }
+    return () => { window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); observer?.disconnect(); };
+  }, [reduceMotion]);
+
   return <div ref={root} id="top" className="landing journey-page refined-b bg-hyper-white text-blackberry font-body" data-reduced-motion={reduceMotion ? "true" : undefined}>
     <FriendlyArrowSymbol />
       <header>
       <nav aria-label="Main navigation"><a className="logo" href="#top" aria-label="NayaSpend home"><Logo className="text-[23px] max-[760px]:text-[20px]" /></a>
-      <div className="navlinks"><a href="#experience">Explore <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></a><a href="#privacy">Your privacy <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></a><a className="signin" href="/api/auth/google/login">Sign in</a></div></nav></header>
+      <div className="navlinks"><a href="#experience">Explore</a><a href="#privacy">Your privacy</a><a className="signin" href="/login">Sign in</a></div></nav></header>
       <main>
       <section id="hero" className="hoverhero">
-      <div className="mx-auto max-w-[1280px] wrap split intro">
+      <div className="mx-auto max-w-[1560px] wrap split intro">
       <div className="hero-copy">
       <h1>Spending happens.<br /><em><span className="clarity">Clarity<svg className="swoosh illustration" viewBox="0 0 250 24" aria-hidden="true" focusable="false"><path d="M5 17 Q110 1 240 12 Q132 9 28 22" fill="none" stroke="#ff5018" strokeWidth="3.2" strokeLinecap="round"/></svg></span> follows.</em></h1>
       <p>A spending companion that turns your NayaPay transaction emails into categories, budgets and trends.</p>
-      <div className="actions flex flex-wrap gap-3"><a className="btn" href="#experience">Take a look <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></a><a className="btn secondary" href="/api/auth/google/login">Get started <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></a></div>
+      <div className="actions flex flex-wrap gap-3"><a className="btn" href="#experience">Take a look <svg className="brand-arrow arrow-down" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></a><a className="btn secondary" href="/login">Get started <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></a></div>
       <p className="small">Independent companion. Read-only Gmail access.</p>
       <div className="hero-proof"><span><svg className="micro illustration" data-story="proof-2" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M3 8 L25 7 L26 23 L4 24 Z M4 9 L15 17 L24 9" transform="translate(1 1)" fill="url(#soft-ember)"/><g fill="none" stroke="#381d2a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" filter="url(#roughen)"><path d="M3 8 L25 7 L26 23 L4 24 Z M4 9 L15 17 L24 9" fill="none" strokeWidth="1.6"/></g></svg>Capture emails</span><span><svg className="micro illustration" data-story="proof-1" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M7 10 Q16 6 23 11 L22 26 Q15 29 8 25 Z M7 10 Q15 14 23 11 M13 3 L19 3" transform="translate(1 1)" fill="url(#soft-silver)"/><g fill="none" stroke="#381d2a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" filter="url(#roughen)"><path d="M7 10 Q16 6 23 11 L22 26 Q15 29 8 25 Z M7 10 Q15 14 23 11 M13 3 L19 3" fill="none" strokeWidth="1.6"/></g></svg>Set budgets</span><span><svg className="micro illustration" data-story="proof-0" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M4 25 L5 19 L10 19 L11 25 M14 25 L14 12 L19 12 L20 25 M24 25 L24 4 L29 4 L29 25" transform="translate(1 1)" fill="url(#soft-violet)"/><g fill="none" stroke="#381d2a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" filter="url(#roughen)"><path d="M4 25 L5 19 L10 19 L11 25 M14 25 L14 12 L19 12 L20 25 M24 25 L24 4 L29 4 L29 25" fill="none" strokeWidth="1.6"/></g></svg>See trends</span></div></div>
       <div className="hero-stack">
       <div className="hero-arrival reveal">
       <div className="floating card"><HeroInk /><span className="eyebrow">Your month, in context</span>
       <h3>A little coffee.<br />A bigger picture.</h3>
-      <div className="row"><span>KAFI</span><strong>PKR 850</strong></div>
+      <div className="row"><span>KAFI</span><strong>PKR <CountUp to={850} /></strong></div>
       <div className="row"><span>Category</span><span className="tag">Food &amp; drink</span></div>
       <div className="bar"><i></i></div>
-      <p className="small">Food &amp; drink budget. PKR 12,400 of PKR 20,000</p></div></div>
+      <p className="small">Food &amp; drink budget. PKR <CountUp to={12400} /> of PKR 20,000</p></div></div>
       <div className="hero-pills"><span className="orbit pill">Email <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg> Insight</span><span className="orbit second pill">Less manual sorting</span></div></div></div></section>
-      <section className="mx-auto max-w-[1280px] wrap workflow"><span className="eyebrow">Follow one little purchase</span>
+      <section className="mx-auto max-w-[1560px] wrap workflow"><span className="eyebrow">Follow one little purchase</span>
       <h2>From inbox detail<br />to a bigger picture.</h2>
       <p>One PKR 850 KAFI coffee, seen in five useful ways.</p>
       <div className="waypoints">
@@ -87,10 +133,10 @@ export function Landing() {
       <article className="waypoint reveal"><Scene number={3} /><strong>03. Category</strong>
       <p>Food &amp; drink<br />A useful place to start</p></article>
       <article className="waypoint reveal"><Scene number={4} /><strong>04. Budget</strong>
-      <p>PKR 12,400 of PKR 20,000<br />Spending against your plan</p></article>
+      <p>PKR <CountUp to={12400} /> of PKR 20,000<br />Spending against your plan</p></article>
       <article className="waypoint reveal"><Scene number={5} /><strong>05. Trend</strong>
       <p>Your month, in context<br />Step back and see patterns</p></article></div></section>
-      <section className="mx-auto max-w-[1280px] wrap" id="experience">
+      <section className="mx-auto max-w-[1560px] wrap" id="experience">
       <div className="shelfheading">
       <div><span className="eyebrow">Follow the details</span>
       <h2>Go on. Explore a little.</h2></div></div>
@@ -118,8 +164,8 @@ export function Landing() {
       <div className="feature-copy">
       <h3>A plan you<br />can follow.</h3>
       <p>Set category budgets and see your spending against the plan.</p></div></div>
-      <div className="miniemail"><strong>Food &amp; drink. PKR 12,400 of PKR 20,000</strong>
-      <div className="bar"><i></i></div>62% of this month's plan</div></article>
+      <div className="miniemail"><strong>Food &amp; drink. PKR <CountUp to={12400} /> of PKR 20,000</strong>
+      <div className="bar"><i></i></div><CountUp to={62} suffix="%" /> of this month's plan</div></article>
       <article className="feature reveal bg-blackberry text-hyper-white" id="feature-4"><span className="eyebrow">04. Remind</span>
       <div className="chapter-main">
       <div className="journey-badge"><Scene number={9} /><span>Waypoint 4. Upcoming payments</span></div><svg className="brand-arrow chapter-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg>
@@ -134,24 +180,24 @@ export function Landing() {
       <h3>Zoom out.<br />See the pattern.</h3>
       <p>Explore trends. Add CSV records and review possible duplicates.</p></div></div>
       <div className="miniemail">NayaPay statement CSV <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg> Dedup review<br /><strong>KAFI PKR 850, kept once</strong></div></article></div></div></section>
-      <section className="mx-auto max-w-[1280px] wrap"><span className="eyebrow">Keep the useful bits together</span>
+      <section className="mx-auto max-w-[1560px] wrap"><span className="eyebrow">Keep the useful bits together</span>
       <h2>Capture. Sort. Plan. Repeat.</h2>
       <p>A few useful tools, working toward the same clearer picture.</p>
       <div className="toolkit"><a className="tool" href="#feature-1"><Scene number={11} />
       <div>
       <h3>Gmail auto-capture</h3>
-      <p>Let NayaPay transaction emails become organized records with read-only access.</p><span className="small">Explore <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></span></div></a><a className="tool" href="#feature-5"><Scene number={12} />
+      <p>Let NayaPay transaction emails become organized records with read-only access.</p><span className="small">Explore</span></div></a><a className="tool" href="#feature-5"><Scene number={12} />
       <div>
       <h3>CSV import</h3>
-      <p>Bring transactions from a NayaPay CSV statement into the same spending picture.</p><span className="small">Explore <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></span></div></a><a className="tool" href="#privacy"><Scene number={13} />
+      <p>Bring transactions from a NayaPay CSV statement into the same spending picture.</p><span className="small">Explore</span></div></a><a className="tool" href="#privacy"><Scene number={13} />
       <div>
       <h3>Dedup review</h3>
-      <p>Look over possible matches before deciding which records to keep.</p><span className="small">Explore <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></span></div></a><a className="tool" href="#feature-5"><Scene number={14} />
+      <p>Look over possible matches before deciding which records to keep.</p><span className="small">Explore</span></div></a><a className="tool" href="#feature-5"><Scene number={14} />
       <div>
       <h3>Spending trends</h3>
-      <p>Step back from individual purchases and explore patterns across your month.</p><span className="small">Explore <svg className="brand-arrow" viewBox="0 0 36 24" aria-hidden="true"><use href="#friendly-arrow"/></svg></span></div></a></div></section>
+      <p>Step back from individual purchases and explore patterns across your month.</p><span className="small">Explore</span></div></a></div></section>
       <section className="privacy" id="privacy">
-      <div className="mx-auto max-w-[1280px] wrap"><span className="eyebrow">A companion, with clear boundaries</span>
+      <div className="mx-auto max-w-[1560px] wrap"><span className="eyebrow">A companion, with clear boundaries</span>
       <h2>Your spending story.<br />Your inbox stays yours.</h2>
       <div className="trust-scene"><Scene number={15} />
       <p>The journey starts with read-only access. You stay in control of your inbox.</p></div>
@@ -168,13 +214,12 @@ export function Landing() {
       <details>
       <summary>Is this NayaPay?</summary>
       <p>No. NayaSpend is an independent companion, not affiliated with NayaPay. It helps organize your spending records.</p></details></div></section>
-      <section className="mx-auto max-w-[1280px] wrap" id="start">
-      <div className="closing"><Scene number={16} /><span className="eyebrow">Less sorting. More understanding.</span>
-      <h2>Make sense of your spending.</h2>
+      </main>
+      <div className="finale" id="start"><div className="finale-card"><section className="closing" aria-labelledby="closing-title"><Scene number={16} /><span className="eyebrow">Less sorting. More understanding.</span>
+      <h2 id="closing-title">Make sense of your spending.</h2>
       <p>Read-only Gmail access. You stay in control of your inbox.</p>
-      <div className="actions flex flex-wrap gap-3"><a className="btn signin" href="/api/auth/google/login">Sign in with Google</a></div>
-      <p className="small">Amounts shown in previews are illustrative.</p></div></section></main>
-      <footer><strong>NayaSpend. Independent spending companion</strong><span>Not affiliated with NayaPay. Amounts shown in previews are illustrative.</span>
-      <div className="footer-links"><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a><a href="#top">Back to top</a></div></footer>
+      <div className="actions flex flex-wrap gap-3"><a className="btn signin" href="/login">Sign in with Google</a></div>
+      <p className="small">Amounts shown in previews are illustrative.</p></section><footer><strong>NayaSpend. Independent spending companion</strong><span>Not affiliated with NayaPay. Amounts shown in previews are illustrative.</span>
+      <div className="footer-links"><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a><a href="#top">Back to top</a></div></footer></div></div>
   </div>;
 }

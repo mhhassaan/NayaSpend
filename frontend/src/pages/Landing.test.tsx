@@ -10,10 +10,12 @@ const observe = vi.fn();
 const unobserve = vi.fn();
 const disconnect = vi.fn();
 let reveal: IntersectionObserverCallback;
+const callbacks: IntersectionObserverCallback[] = [];
 beforeEach(() => {
+  callbacks.length = 0;
   vi.mocked(useReducedMotion).mockReturnValue(false);
   vi.stubGlobal("IntersectionObserver", class {
-    constructor(callback: IntersectionObserverCallback) { reveal = callback; }
+    constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) { callbacks.push(callback); if (options?.threshold === 0.1) reveal = callback; }
     observe = observe;
     unobserve = unobserve;
     disconnect = disconnect;
@@ -40,7 +42,7 @@ test("renders the locked headline, numbered chapters and local copy", () => {
 test("all sign-in controls link directly to Google OAuth", () => {
   render(<Landing />);
   for (const name of ["Sign in", "Sign in with Google", "Get started"]) {
-    expect(screen.getByRole("link", { name })).toHaveAttribute("href", "/api/auth/google/login");
+    expect(screen.getByRole("link", { name })).toHaveAttribute("href", "/login");
   }
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
@@ -86,7 +88,7 @@ test("reveals observed content once and disconnects on unmount", () => {
   expect(target).toHaveClass("visible");
   expect(unobserve).toHaveBeenCalledWith(target);
   unmount();
-  expect(disconnect).toHaveBeenCalledOnce();
+  expect(disconnect).toHaveBeenCalled();
 });
 
 test("reduced motion preserves visible content without an observer", () => {
@@ -131,4 +133,36 @@ test("reduced motion does not attach hero tilt handlers", () => {
   vi.stubGlobal("matchMedia", media);
   render(<Landing />);
   expect(media).not.toHaveBeenCalled();
+});
+
+test("spending bars fill and amounts count up to their real value once scrolled into view", () => {
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  const { container } = render(<Landing />);
+  const bar = container.querySelector(".bar")!;
+  const amount = container.querySelector(".floating .small span")!;
+  expect(container.querySelector(".landing")).toHaveClass("anim");
+  expect(bar).not.toHaveClass("filled");
+  expect(amount).toHaveTextContent("0");
+  act(() => {
+    for (const cb of callbacks) cb([{ isIntersecting: true, target: bar } as IntersectionObserverEntry, { isIntersecting: true, target: amount } as IntersectionObserverEntry], {} as IntersectionObserver);
+  });
+  expect(bar).toHaveClass("filled");
+  const step = (ts: number) => act(() => { frames.splice(0).forEach(cb => cb(ts)); });
+  step(1000);
+  expect(amount).toHaveTextContent("0");
+  step(1700);
+  const midway = Number(amount.textContent!.replace(/,/g, ""));
+  expect(midway).toBeGreaterThan(0);
+  expect(midway).toBeLessThan(12400);
+  step(5000);
+  expect(amount).toHaveTextContent("12,400");
+});
+
+test("sign-in buttons lead to the sign-up page and the nav has no arrows", () => {
+  const { container } = render(<Landing />);
+  expect(screen.getByRole("link", { name: "Sign in with Google" })).toHaveAttribute("href", "/login");
+  expect(container.querySelector(".navlinks svg")).toBeNull();
+  expect(container.querySelector(".finale footer")).not.toBeNull();
 });

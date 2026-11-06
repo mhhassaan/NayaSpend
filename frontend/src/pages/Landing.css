@@ -13,7 +13,7 @@ body:has(.landing){margin:0;background:#fcf9fb;color:#381d2a;font:17px/1.6 'DM S
 .landing a,.landing button{-webkit-tap-highlight-color:transparent}
 .landing a:focus-visible,.landing button:focus-visible,.landing summary:focus-visible,.landing [tabindex]:focus-visible{outline:3px solid #9048c4;outline-offset:5px}
 .landing header{position:relative;z-index:5;border-bottom:1px solid #d9d2d5;background:var(--paper)}
-.landing nav{max-width:1280px;margin:auto;min-height:88px;display:flex;align-items:center;justify-content:space-between;padding:16px 5%;gap:18px}
+.landing nav{max-width:1560px;margin:auto;min-height:88px;display:flex;align-items:center;justify-content:space-between;padding:16px 5%;gap:18px}
 .landing .logo{display:flex;align-items:center;gap:7px;font-size:23px;font-weight:700;letter-spacing:-1px}
 .landing .logo svg{width:37px;height:37px}
 .landing .navlinks{display:flex;gap:24px;align-items:center;font-size:14px}
@@ -49,7 +49,7 @@ body:has(.landing){margin:0;background:#fcf9fb;color:#381d2a;font:17px/1.6 'DM S
 .landing .closing{text-align:center;padding:65px 24px;background:#381d2a;color:#fcf9fb;border-radius:30px}
 .landing .closing p{margin:15px auto}
 .landing .closing .actions{justify-content:center}
-.landing footer{max-width:1280px;margin:auto;padding:35px 5%;display:flex;justify-content:space-between;gap:25px;font-size:13px}
+.landing footer{max-width:1560px;margin:auto;padding:35px 5%;display:flex;justify-content:space-between;gap:25px;font-size:13px}
 .landing details{border-bottom:1px solid #d9d2d5;padding:18px 0}
 .landing summary{cursor:pointer;font-weight:700}
 .landing .reveal{opacity:1}
@@ -536,3 +536,22 @@ html:has(.landing){-webkit-tap-highlight-color:transparent;-webkit-text-size-adj
 .landing .waypoint{position:relative}
 .landing .waypoint:not(:last-child)::after{content:'';position:absolute;pointer-events:none;left:152px;right:-26px;top:56px;height:22px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 20' preserveAspectRatio='none'%3E%3Cpath d='M2 11C22 2 38 19 58 10S88 5 98 10' fill='none' stroke='%239048c4' stroke-width='2' stroke-linecap='round' stroke-dasharray='6 7' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E") center/100% 100% no-repeat}
 @media(max-width:760px){.landing .waypoint:not(:last-child)::after{left:56px;right:auto;width:0;top:auto;bottom:-20px;height:20px;background:none;border-left:2px dashed #9048c4}}
+
+/* v17: sticky blurred nav, wider layout, animated bars, inertial scroll, expanding finale. */
+.landing header{position:sticky;top:0;z-index:30;background:rgba(252,249,251,.72);-webkit-backdrop-filter:blur(18px) saturate(1.6);backdrop-filter:blur(18px) saturate(1.6);border-bottom:1px solid rgba(56,29,42,.08)}
+.landing .arrow-down{transform:rotate(90deg)}
+.landing.anim .bar i{transform:scaleX(0)}
+.landing.anim .bar.filled i{transform:scaleX(.62);transition:transform 1.4s var(--ease) .15s}
+html.lenis:has(.landing),html.lenis:has(.landing) body{scroll-behavior:auto;height:auto}
+html.lenis.lenis-stopped:has(.landing){overflow:hidden}
+.landing .finale{--p:1;position:relative;margin-top:24px}
+.landing .finale-card{background:radial-gradient(ellipse at 0 0,#ff50182b,transparent 60%),#381d2a;color:#fcf9fb;--arrow-color:#fcf9fb;clip-path:inset(0 calc((1 - var(--p)) * max(16px, (100% - 1400px) / 2)) round calc((1 - var(--p)) * 30px))}
+.landing .finale .closing{background:none;border-radius:0;max-width:1560px;margin:auto;padding:80px 24px 56px}
+.landing .finale footer{color:#fcf9fb;border-top:1px solid rgba(252,249,251,.16);padding-top:28px}
+.landing .finale footer a{color:#fcf9fb;opacity:.85}
+.landing .finale footer a:hover{opacity:1;text-decoration:underline}
+@keyframes invite{0%,60%,100%{transform:none}64%{transform:translateX(-5px) rotate(-3deg)}68%{transform:translateX(5px) rotate(3deg)}72%{transform:translateX(-4px) rotate(-2.4deg)}76%{transform:translateX(4px) rotate(2.4deg)}80%{transform:translateX(-2px) rotate(-1deg)}84%{transform:none}}
+.landing .finale.in-view .closing .btn{animation:invite 3.4s ease-in-out .9s infinite}
+@media (hover:hover) and (pointer:fine){.landing .finale .closing .btn:hover{animation:none}}
+.landing .finale .closing .btn:focus-visible,.landing .finale .closing .btn:active{animation:none}
+@media (prefers-reduced-motion:reduce){.landing .finale .closing .btn{animation:none!important}.landing .finale-card{clip-path:none}}

@@ -3,6 +3,9 @@ import { describe, expect, test, vi } from "vitest";
 import { Login } from "./Login";
 import userEvent from "@testing-library/user-event";
 
+// jsdom has no 2D canvas; the liquid background simply stays blank under test.
+HTMLCanvasElement.prototype.getContext = vi.fn(() => null) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
 vi.mock("motion/react", async (importOriginal) => ({
   ...await importOriginal<typeof import("motion/react")>(),
   useReducedMotion: () => true,
@@ -74,4 +77,12 @@ test("keeps the primary OAuth CTA reachable by keyboard with decorations present
   expect(cta).toBeVisible();
   expect(cta).toHaveFocus();
   expect(cta).toHaveAttribute("href", "/api/auth/google/login");
+});
+
+test("paints the fluted-glass liquid behind the page as a decorative, non-interactive canvas", () => {
+  render(<Login />);
+  const liquid = screen.getByTestId("login-liquid");
+  expect(liquid.tagName).toBe("CANVAS");
+  expect(liquid).toHaveAttribute("aria-hidden", "true");
+  expect(liquid).toHaveClass("login-liquid");
 });
