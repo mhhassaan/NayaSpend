@@ -5,6 +5,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, test } from "vitest";
 import { routes } from "./App";
 
+// Torph requires WAAPI getAnimations even when disabled; jsdom does not implement it.
+vi.mock("torph/react", () => ({
+  TextMorph: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+}));
+
 // createMemoryRouter/createBrowserRouter each attach internal state to the
 // route objects they're given -- reusing the same objects across two
 // router instances makes the second one error. This shallow-clones each
@@ -42,16 +47,23 @@ describe("App routing", () => {
 
 test("welcome renders the public landing page outside AppShell", () => {
   renderAt("/welcome");
-  expect(screen.getByRole("heading", { level: 1, name: /Spending happens.*Clarity follows/ })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Know where your NayaPay money went." })).toBeInTheDocument();
   expect(screen.queryByRole("navigation", { name: /primary/i })).not.toBeInTheDocument();
 });
 
 // jsdom has no viewport observer; keep Motion real and provide its browser API.
-beforeAll(() => vi.stubGlobal("IntersectionObserver", class {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}));
+beforeAll(() => {
+  vi.stubGlobal("IntersectionObserver", class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+  // Route tests keep Motion and NumberFlow real, exercising their static mode.
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query.includes("prefers-reduced-motion"), media: query,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+  }));
+});
 afterAll(() => vi.unstubAllGlobals());
 
 test.each([["/terms", "Terms of Service"], ["/privacy", "Privacy Policy"]])("%s is public and outside AppShell", (path, heading) => {
