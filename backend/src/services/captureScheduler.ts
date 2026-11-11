@@ -1,3 +1,4 @@
+import type { SuggestionOptions } from "./llmSuggestionService";
 import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { captureRuns } from "../db/schema";
@@ -29,15 +30,16 @@ export async function runCaptureScheduler(
   client: GmailClient,
   queue: QueueSender,
   userId: number,
-  attempt = 1
+  attempt = 1,
+  suggestions?: SuggestionOptions
 ): Promise<void> {
   const [run] = await db.select().from(captureRuns).where(eq(captureRuns.userId, userId));
 
   try {
     if (run?.backfillCompletedAt) {
-      await runOngoingPoll(db, client, userId);
+      await runOngoingPoll(db, client, userId, suggestions);
     } else {
-      await runBackfill(db, client, userId);
+      await runBackfill(db, client, userId, suggestions);
     }
   } catch (err) {
     // runBackfill/runOngoingPoll already catch and record every Gmail API

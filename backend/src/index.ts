@@ -72,7 +72,7 @@ async function recordDispatchFailure(env: Env, err: unknown, userId: number) {
   }
 }
 
-async function dispatchCapture(env: Env) {
+async function dispatchCapture(env: Env, ctx: ExecutionContext) {
   const db = drizzle(env.DB);
   const credentialRows = await db.select({ userId: gmailCredentials.userId }).from(gmailCredentials);
   for (const { userId } of credentialRows) {
@@ -85,7 +85,7 @@ async function dispatchCapture(env: Env) {
         await recordDispatchFailure(env, err, userId);
         throw err;
       }
-      if (client) await runCaptureScheduler(db, client, env.CAPTURE_RETRY_QUEUE, userId);
+      if (client) await runCaptureScheduler(db, client, env.CAPTURE_RETRY_QUEUE, userId, 1, { env, waitUntil: task => ctx.waitUntil(task) });
     } catch (err) {
       console.error(`capture dispatch failed for user ${userId}:`, err);
     }
@@ -110,7 +110,7 @@ export default {
   async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext) {
     try {
       if (event.cron === CAPTURE_CRON) {
-        await dispatchCapture(env);
+        await dispatchCapture(env, _ctx);
       } else if (event.cron === WATCHDOG_CRON) {
         await dispatchWatchdog(env);
       } else {
@@ -139,7 +139,7 @@ export default {
     }
   },
 
-  async queue(batch: MessageBatch<{ attempt: number; userId: number }>, env: Env) {
+  async queue(batch: MessageBatch<{ attempt: number; userId: number }>, env: Env, ctx?: ExecutionContext) {
     const db = drizzle(env.DB);
     for (const message of batch.messages) {
       // Each message is acked regardless of outcome: runCaptureScheduler
@@ -157,7 +157,7 @@ export default {
           continue;
         }
         if (!client) continue;
-        await runCaptureScheduler(db, client, env.CAPTURE_RETRY_QUEUE, message.body.userId, message.body.attempt);
+        await runCaptureScheduler(db, client, env.CAPTURE_RETRY_QUEUE, message.body.userId, message.body.attempt, { env, waitUntil: ctx ? task => ctx.waitUntil(task) : undefined });
       } catch (err) {
         console.error("queue message processing failed:", err);
       } finally {

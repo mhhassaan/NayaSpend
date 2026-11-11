@@ -1,4 +1,5 @@
-export const CANONICAL_CATEGORIES = ["Transfers", "Health", "Food & Dining", "Groceries", "Transport", "Utilities", "Uncategorized"];
+import { CANONICAL_CATEGORIES } from "../../../shared/categories";
+export { CANONICAL_CATEGORIES } from "../../../shared/categories";
 
 type CategorySelectProps = {
   value: string;

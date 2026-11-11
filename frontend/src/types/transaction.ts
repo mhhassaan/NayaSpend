@@ -1,3 +1,4 @@
+import type { TransactionSuggestion } from "../../../shared/categories";
 // Mirrors backend/src/db/schema.ts's row shapes field-for-field (camelCase
 // property names, string | null for nullable columns). Hand-written, not
 // generated -- kept in sync manually when the backend schema changes.
@@ -17,6 +18,8 @@ export type Transaction = {
   deletedAt: string | null;
   gmailMessageId: string | null;
   statementRowKey: string | null;
+  suggestion?: TransactionSuggestion | null;
+  suggestionStatus?: "pending" | "dismissed" | null;
 };
 
 export type Budget = {

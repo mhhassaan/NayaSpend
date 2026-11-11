@@ -1,9 +1,11 @@
+import { suggestionContext } from "../services/suggestionContext";
+import type { SuggestionEnv } from "../services/llmSuggestionService";
 import { requireAuth, type AuthUser } from "../middleware/auth";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { importStatementCsv, parseStatementCsv } from "../adapters/statementAdapter";
 
-type Env = {
+type Env = SuggestionEnv & {
   DB: D1Database;
 };
 
@@ -55,7 +57,7 @@ export const statementsRoutes = new Hono<{ Bindings: Env; Variables: { user: Aut
   }
 
   const db = drizzle(c.env.DB);
-  const result = await importStatementCsv(db, text, fileRef, c.get("user").id);
+  const result = await importStatementCsv(db, text, fileRef, c.get("user").id, suggestionContext(c));
 
   return c.json(result, 201);
 });

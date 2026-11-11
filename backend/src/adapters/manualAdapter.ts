@@ -1,3 +1,4 @@
+import { queueSuggestions, type SuggestionOptions } from "../services/llmSuggestionService";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { transactions } from "../db/schema";
 import { categorize, normalize } from "../services/categorizationEngine";
@@ -31,7 +32,8 @@ function isValidIsoDate(date: string): boolean {
 export async function logMissedTransaction(
   db: DrizzleD1Database,
   input: MissedTransactionInput,
-  userId: number
+  userId: number,
+  suggestions?: SuggestionOptions
 ): Promise<{ id: number; category: string }> {
   const vendorRaw = input.vendorRaw.trim();
   if (!vendorRaw) {
@@ -62,5 +64,6 @@ export async function logMissedTransaction(
     })
     .returning({ id: transactions.id, category: transactions.category });
 
+  await queueSuggestions(db, userId, [row.id], suggestions);
   return row;
 }

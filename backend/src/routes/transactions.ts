@@ -1,3 +1,4 @@
+import { generateSuggestion, type SuggestionEnv } from "../services/llmSuggestionService";
 import { Hono } from "hono";
 import { and, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -18,14 +19,10 @@ function isValidIsoDate(date: unknown): date is string {
   return new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) === date;
 }
 
-function isPositiveInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value > 0;
-}
-
 const DEDUP_ACTIONS = ["kept", "discarded", "confirmed_distinct"] as const;
 type DedupAction = (typeof DEDUP_ACTIONS)[number];
 
-type Env = {
+type Env = SuggestionEnv & {
   DB: D1Database;
 };
 
@@ -71,7 +68,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
       // Recheck eligibility so a concurrent manual correction is never overwritten.
       const changed = await db
         .update(transactions)
-        .set({ category })
+        .set({ category, suggestion: null, suggestionStatus: row.suggestionStatus === "pending" ? "dismissed" : row.suggestionStatus })
         .where(and(eq(transactions.id, row.id), eligible))
         .returning({ id: transactions.id });
       recategorized += changed.length;
@@ -95,7 +92,28 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
       )
       .orderBy(desc(transactions.date));
 
-    return c.json(rows);
+    return c.json(rows.map(row => c.env.DEEPSEEK_API_KEY?.trim() ? row : { ...row, suggestion: null }));
+  })
+  .post("/:id/suggestion", async (c) => {
+    const db = drizzle(c.env.DB);
+    const userId = c.get("user").id;
+    const id = Number(c.req.param("id"));
+    const [row] = await db.select().from(transactions).where(and(eq(transactions.userId, userId), eq(transactions.id, id), isNull(transactions.deletedAt)));
+    if (!row) return c.text("not found", 404);
+    try {
+      const suggestion = await generateSuggestion(db, c.env, userId, id);
+      return c.json({ suggestion });
+    } catch {
+      return c.json({ suggestion: null });
+    }
+  })
+  .delete("/:id/suggestion", async (c) => {
+    const db = drizzle(c.env.DB);
+    const changed = await db.update(transactions).set({ suggestion: null, suggestionStatus: "dismissed" }).where(and(
+      eq(transactions.userId, c.get("user").id), eq(transactions.id, Number(c.req.param("id"))), isNull(transactions.deletedAt)
+    )).returning({ id: transactions.id });
+    if (!changed.length) return c.text("not found", 404);
+    return c.json({ suggestion: null });
   })
   .get("/:id", async (c) => {
     const id = Number(c.req.param("id"));
@@ -105,7 +123,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
     if (!row) {
       return c.text("not found", 404);
     }
-    return c.json(row);
+    return c.json(c.env.DEEPSEEK_API_KEY?.trim() ? row : { ...row, suggestion: null });
   })
   .patch("/:id", async (c) => {
     const id = Number(c.req.param("id"));
@@ -133,8 +151,8 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
       updates.vendorNormalized = normalize(vendorRaw);
     }
     if (body.amount !== undefined) {
-      if (!isPositiveInteger(body.amount)) {
-        return c.text("amount must be a positive integer", 400);
+      if (typeof body.amount !== "number" || !Number.isSafeInteger(body.amount) || body.amount === 0) {
+        return c.text("amount must be a non-zero integer", 400);
       }
       updates.amount = body.amount;
     }
@@ -152,6 +170,10 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
       updates.category = category;
     }
 
+    if (Object.keys(updates).length) {
+      updates.suggestion = null;
+      updates.suggestionStatus = "dismissed";
+    }
     await db.update(transactions).set(updates).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
     const [updated] = await db.select().from(transactions).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
     return c.json(updated);
@@ -176,7 +198,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
       return c.text("category must be a non-empty string", 400);
     }
 
-    await db.update(transactions).set({ category }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
+    await db.update(transactions).set({ category, suggestion: null, suggestionStatus: "dismissed" }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
     await correctCategory(db, row.vendorNormalized, category, c.get("user").id);
 
     return c.json({ id, category });
@@ -205,7 +227,7 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
     }
 
     if (action === "reject") {
-      await db.update(transactions).set({ deletedAt: new Date().toISOString() }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
+      await db.update(transactions).set({ deletedAt: new Date().toISOString(), suggestion: null, suggestionStatus: "dismissed" }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
       return c.json({ resolved: "reject", matched: false });
     }
 
@@ -214,11 +236,11 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
     // frontend is required to PATCH real values in before committing.
     // Reject a commit that skipped that edit rather than writing junk
     // into the ledger.
-    if (!(row.amount > 0)) {
-      return c.text("amount must be a positive integer before this row can be committed", 400);
+    if (!Number.isSafeInteger(row.amount) || row.amount === 0) {
+      return c.text("amount must be a non-zero integer before this row can be committed", 400);
     }
 
-    await db.update(transactions).set({ reviewStatus: "committed" }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
+    await db.update(transactions).set({ reviewStatus: "committed", suggestion: null, suggestionStatus: "dismissed" }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, id)));
     // Committing a quarantined row makes it eligible for dedup comparison for
     // the first time -- the spec requires re-running the check immediately
     // against the now-larger committed set, not waiting for some other event.
@@ -283,8 +305,8 @@ export const transactionsRoutes = new Hono<{ Bindings: Env; Variables: { user: A
           : [{ dedupResolution: "confirmed_distinct" as const }, { dedupResolution: "confirmed_distinct" as const }];
 
     await db.batch([
-      db.update(transactions).set(targetUpdate).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, target.id))),
-      db.update(transactions).set(counterpartUpdate).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, counterpart.id))),
+      db.update(transactions).set({ ...targetUpdate, suggestion: null, suggestionStatus: "dismissed" }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, target.id))),
+      db.update(transactions).set({ ...counterpartUpdate, suggestion: null, suggestionStatus: "dismissed" }).where(and(eq(transactions.userId, c.get("user").id), eq(transactions.id, counterpart.id))),
     ]);
 
     return c.json({ resolved: resolution });

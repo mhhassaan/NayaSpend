@@ -26,3 +26,7 @@ NOTIFICATION_EMAIL=you@example.com
 # failure) instead of ending on a bare Worker response. The Vite dev
 # server's own default port is 5173.
 FRONTEND_BASE_URL=http://localhost:5173
+
+# Optional: omit the key to disable AI suggestions.
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-flash

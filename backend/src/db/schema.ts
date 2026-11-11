@@ -1,3 +1,4 @@
+import type { TransactionSuggestion } from "../../../shared/categories";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -66,6 +67,8 @@ export const transactions = sqliteTable("transactions", {
   // re-uploading the same statement) is a no-op per row via
   // onConflictDoNothing, not a duplicate transaction.
   statementRowKey: text("statement_row_key").unique(),
+  suggestion: text("suggestion", { mode: "json" }).$type<TransactionSuggestion>(),
+  suggestionStatus: text("suggestion_status", { enum: ["pending", "dismissed"] }),
 }, (table) => ({
   amountIsInteger: check(
     "amount_is_integer",
