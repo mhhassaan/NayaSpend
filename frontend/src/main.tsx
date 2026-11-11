@@ -15,7 +15,7 @@ const queryClient = new QueryClient();
 // auth setup, so wrapping it there would break that file. This transform
 // only affects the real, production router.
 const guardedRoutes = routes.map((route) =>
-  route.path === "/" ? { ...route, element: <RequireAuth>{route.element}</RequireAuth> } : route
+  route.path === "/" ? { ...route, element: <RequireAuth redirectTo="/welcome">{route.element}</RequireAuth> } : route
 );
 const router = createBrowserRouter(guardedRoutes);
 

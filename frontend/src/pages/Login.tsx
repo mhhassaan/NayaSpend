@@ -1,4 +1,5 @@
 import { Logo } from "../components/Logo";
+import { API_BASE } from "../api/base";
 import { FlutedLiquid } from "../components/FlutedLiquid";
 import { InkDefinitions } from "../components/ink/InkDefinitions";
 import { InkScene } from "../components/ink/InkScene";
@@ -19,7 +20,7 @@ export function Login() {
       <h1 id="signin-title" className="font-display text-3xl font-bold text-text-primary">A little clarity starts here.</h1>
       <p className="font-body text-[15px] text-text-secondary">Sign in to see your spending.</p>
       <a
-        href="/api/auth/google/login"
+        href={`${API_BASE}/auth/google/login`}
         className="login-cta rounded-md bg-blackberry px-6 py-3 text-center font-body text-[15px] font-semibold text-hyper-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-deep-violet focus-visible:outline-offset-4"
       >
         Sign in with Google

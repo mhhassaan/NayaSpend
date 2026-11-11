@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /welcome
+Disallow: /api/
+Sitemap: https://nayaspend.app/sitemap.xml

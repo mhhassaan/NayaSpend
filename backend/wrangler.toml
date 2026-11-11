@@ -2,10 +2,21 @@ name = "nayaspend-backend"
 main = "src/index.ts"
 compatibility_date = "2025-02-04"
 
+# Served at https://api.nayaspend.app (the domain must be a Cloudflare zone).
+routes = [{ pattern = "api.nayaspend.app", custom_domain = true }]
+
+# Non-secret production config. Secrets are set with `wrangler secret put`:
+# GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, RESEND_API_KEY, TOKEN_ENCRYPTION_KEY,
+# NOTIFICATION_EMAIL, DEEPSEEK_API_KEY (optional). See docs/DEPLOY.md.
+[vars]
+FRONTEND_BASE_URL = "https://nayaspend.app"
+GMAIL_REDIRECT_URI = "https://api.nayaspend.app/auth/gmail/callback"
+DEEPSEEK_MODEL = "deepseek-flash"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "nayaspend"
-database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
+database_id = "7c683cc8-ebe2-471f-8ffe-9a53393661c0"
 
 # Capture Scheduler retry queue: on a Gmail API failure, a retry message
 # is enqueued with a delaySeconds of 60/300/900 (1/5/15 min) instead of
