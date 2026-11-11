@@ -16,7 +16,7 @@ DEEPSEEK_MODEL = "deepseek-flash"
 [[d1_databases]]
 binding = "DB"
 database_name = "nayaspend"
-database_id = "REPLACE_WITH_REAL_D1_DATABASE_ID"
+database_id = "7c683cc8-ebe2-471f-8ffe-9a53393661c0"
 
 # Capture Scheduler retry queue: on a Gmail API failure, a retry message
 # is enqueued with a delaySeconds of 60/300/900 (1/5/15 min) instead of

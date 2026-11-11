@@ -5,7 +5,7 @@ import { apiClient } from "../api/client";
 
 type AuthStatus = "pending" | "authenticated" | "unauthenticated";
 
-export function RequireAuth({ children }: { children: ReactNode }) {
+export function RequireAuth({ children, redirectTo = "/login" }: { children: ReactNode; redirectTo?: string }) {
   const [status, setStatus] = useState<AuthStatus>("pending");
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (status === "unauthenticated") {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={redirectTo} replace />;
   }
 
   return <>{children}</>;

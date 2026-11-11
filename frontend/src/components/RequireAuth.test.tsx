@@ -43,3 +43,20 @@ describe("RequireAuth", () => {
     expect(await screen.findByText("protected content")).toBeInTheDocument();
   });
 });
+
+describe("RequireAuth redirectTo", () => {
+  test("sends signed-out visitors to a custom redirectTo (the landing page) instead of /login", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 401 })));
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route path="/welcome" element={<div>landing page</div>} />
+          <Route path="/login" element={<div>login page</div>} />
+          <Route path="/" element={<RequireAuth redirectTo="/welcome"><div>protected content</div></RequireAuth>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    expect(await screen.findByText("landing page")).toBeInTheDocument();
+    expect(screen.queryByText("login page")).not.toBeInTheDocument();
+  });
+});
