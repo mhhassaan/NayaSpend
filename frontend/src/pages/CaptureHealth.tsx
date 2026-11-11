@@ -1,4 +1,5 @@
 import { CaptureHealthEmptyIllustration } from "../components/illustrations";
+import { API_BASE } from "../api/base";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -69,7 +70,7 @@ function StatusSection({ health, justConnected }: { health: CaptureHealthData; j
         <Pill>Needs reconnect</Pill>
         <h2 className="font-display text-lg font-semibold">Let's reconnect Gmail.</h2>
         <p className="font-body text-sm">Your Gmail authorization is no longer valid, so email capture is paused. Reconnect with Google to let NayaSpend read transaction emails again.</p>
-        <a href="/api/auth/gmail/reconnect" className="rounded-md bg-blackberry px-6 py-3 font-body text-[13px] font-semibold text-hyper-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-deep-violet focus-visible:outline-offset-4">
+        <a href={`${API_BASE}/auth/gmail/reconnect`} className="rounded-md bg-blackberry px-6 py-3 font-body text-[13px] font-semibold text-hyper-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-deep-violet focus-visible:outline-offset-4">
           Reconnect
         </a>
         <p className="text-sm text-text-secondary">Google will guide you through confirming access.</p>
@@ -84,7 +85,7 @@ function StatusSection({ health, justConnected }: { health: CaptureHealthData; j
         message="Gmail not connected yet."
         actionLabel="Connect Gmail"
         onAction={() => {
-          window.location.href = "/api/auth/gmail/connect";
+          window.location.href = `${API_BASE}/auth/gmail/connect`;
         }}
       />
     );

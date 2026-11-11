@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { API_BASE } from "../api/base";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { PageTransition } from "./PageTransition";
 import { Logo } from "./Logo";
@@ -36,7 +37,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   async function signOut() {
     try {
-      await fetch("/api/auth/google/logout", { method: "POST", credentials: "include" });
+      await fetch(`${API_BASE}/auth/google/logout`, { method: "POST", credentials: "include" });
     } catch {
       showError("Couldn't sign out -- try again.");
       return;

@@ -2,6 +2,17 @@ name = "nayaspend-backend"
 main = "src/index.ts"
 compatibility_date = "2025-02-04"
 
+# Served at https://api.nayaspend.app (the domain must be a Cloudflare zone).
+routes = [{ pattern = "api.nayaspend.app", custom_domain = true }]
+
+# Non-secret production config. Secrets are set with `wrangler secret put`:
+# GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, RESEND_API_KEY, TOKEN_ENCRYPTION_KEY,
+# NOTIFICATION_EMAIL, DEEPSEEK_API_KEY (optional). See docs/DEPLOY.md.
+[vars]
+FRONTEND_BASE_URL = "https://nayaspend.app"
+GMAIL_REDIRECT_URI = "https://api.nayaspend.app/auth/gmail/callback"
+DEEPSEEK_MODEL = "deepseek-flash"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "nayaspend"
