@@ -6,7 +6,7 @@ import { categorize, normalize } from "../services/categorizationEngine";
 import { runDedupCheck } from "../services/dedupEngine";
 import { GmailApiError, NAYAPAY_QUERY } from "./gmailClient";
 import type { GmailClient, GmailMessage } from "./gmailClient";
-import { parseNayaPayEmail } from "./parseNayaPayEmail";
+import { classifyNayaPaySubject, parseNayaPayEmail, type ParsedTransaction } from "./parseNayaPayEmail";
 
 const DEFAULT_MAX_MESSAGES_PER_CHUNK = 50;
 const BODY_EXCERPT_LENGTH = 500;
@@ -22,13 +22,9 @@ async function getOrCreateCaptureRun(db: DrizzleD1Database, userId: number) {
   return created;
 }
 
-function buildCommittedRow(message: GmailMessage, category: string, parsed: {
-  amountCents: number;
-  date: string;
-  vendorRaw: string;
-}): Omit<TransactionInsert, "userId"> {
+function buildCommittedRow(message: GmailMessage, category: string, parsed: ParsedTransaction): Omit<TransactionInsert, "userId"> {
   return {
-    amount: -parsed.amountCents,
+    amount: parsed.direction === "out" ? -parsed.amountCents : parsed.amountCents,
     date: parsed.date,
     vendorRaw: parsed.vendorRaw,
     vendorNormalized: normalize(parsed.vendorRaw),
@@ -50,10 +46,10 @@ function buildCommittedRow(message: GmailMessage, category: string, parsed: {
 // which already scopes server-side via NAYAPAY_QUERY) -- this re-checks
 // the same sender/subject condition per-message so a poll never stores a
 // row for unrelated mail that happens to land in the inbox.
-function matchesNayaPayScope(message: GmailMessage): boolean {
+export function matchesNayaPayScope(message: GmailMessage): boolean {
   return (
-    message.from.toLowerCase().includes("nayapay.com") &&
-    message.subject.toLowerCase().includes("you spent")
+    /(?:^|[<\s])[^<>\s@]+@nayapay\.com(?:>|\s|$)/i.test(message.from) &&
+    classifyNayaPaySubject(message.subject) !== null
   );
 }
 
@@ -125,7 +121,9 @@ async function fetchAndBuildRows(
     const parsed = parseNayaPayEmail(message);
 
     if (parsed.confidence === "high") {
-      const category = await categorize(db, parsed.vendorRaw, userId);
+      const kind = classifyNayaPaySubject(message.subject);
+      const transfer = kind === "sent" || kind === "got" || kind === "reversal";
+      const category = await categorize(db, parsed.vendorRaw, userId, transfer ? "Transfers" : undefined);
       rows.push({ ...buildCommittedRow(message, category, parsed), userId });
       committedCount++;
     } else {

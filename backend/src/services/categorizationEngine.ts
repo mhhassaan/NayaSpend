@@ -12,8 +12,8 @@ const KEYWORD_RULES: { pattern: RegExp; category: (typeof CANONICAL_CATEGORIES)[
   { pattern: /\b(pharmacyy?|pharmacies|medical store|chemist|hospital|clinic)\b/, category: CANONICAL_CATEGORIES[1] },
   { pattern: /\b(kfc|foodpanda|sweets?|bakery|bakers?|restaurants?|cafe|coffee|biryani|pizza|burgers?|bbq|barbecue|potato factory|mcdonald'?s|bundu khan)\b/, category: CANONICAL_CATEGORIES[2] },
   { pattern: /\b(mart|supermarket|cash (?:and|&) carry|grocer(?:y|ies|s)?|general store)\b/, category: CANONICAL_CATEGORIES[3] },
-  { pattern: /\b(gasoline|petrol|fuel|careem|uber|bykea|taxi)\b/, category: CANONICAL_CATEGORIES[4] },
-  { pattern: /\b(mobile top[ -]?up|recharge|m[ -]?tag|jazz|zong|ufone|telenor|electricity|gas bill|water bill|internet|wi[ -]?fi|lesco|iesco|k[ -]electric|ptcl|sngpl|ssgc)\b/, category: CANONICAL_CATEGORIES[5] },
+  { pattern: /\b(m[ -]?tag|gasoline|petrol|fuel|careem|uber|bykea|taxi)\b/, category: CANONICAL_CATEGORIES[4] },
+  { pattern: /\b(mobile top[ -]?up|recharge|jazz|zong|ufone|telenor|electricity|gas bill|water bill|internet|wi[ -]?fi|lesco|iesco|k[ -]electric|ptcl|sngpl|ssgc)\b/, category: CANONICAL_CATEGORIES[5] },
 ];
 
 export function classifyByKeyword(vendorNormalized: string): string | null {
@@ -27,7 +27,8 @@ export function normalize(vendor: string): string {
 export async function categorize(
   db: DrizzleD1Database,
   vendorNormalized: string,
-  userId: number
+  userId: number,
+  defaultCategory?: string
 ): Promise<string> {
   const normalized = normalize(vendorNormalized);
   const [rule] = await db
@@ -35,7 +36,7 @@ export async function categorize(
     .from(categoryRules)
     .where(and(eq(categoryRules.userId, userId), eq(categoryRules.vendorNormalized, normalized)));
 
-  return rule?.category ?? classifyByKeyword(normalized) ?? UNCATEGORIZED;
+  return rule?.category ?? defaultCategory ?? classifyByKeyword(normalized) ?? UNCATEGORIZED;
 }
 
 export async function correctCategory(

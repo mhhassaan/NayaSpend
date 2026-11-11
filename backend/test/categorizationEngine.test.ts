@@ -17,7 +17,7 @@ describe("categorizationEngine", () => {
     ["rainbow cash and carry lahore pk", "Groceries"],
     ["taj gasoline lahore pk|visa xxxx8978", "Transport"],
     ["mobile top-up purchased |jazz 03027816995", "Utilities"],
-    ["m-tag recharge|m faryad - lexxxxx5", "Utilities"],
+    ["m-tag recharge|m faryad - lexxxxx5", "Transport"],
     ["outgoing fund transfer to muhammad hassan", "Transfers"],
     ["incoming fund transfer from bank alfalah-0797", "Transfers"],
     ["money received from ariba faryad|(aribafaryad@nayapay)", "Transfers"],

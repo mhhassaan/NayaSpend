@@ -1,85 +1,103 @@
 import type { GmailMessage } from "./gmailClient";
 
+export type NayaPayEmailKind = "spent" | "sent" | "got" | "bundle" | "topup" | "mtag" | "reversal";
 export type ParsedTransaction = {
   amountCents: number;
+  direction: "in" | "out";
   date: string;
   vendorRaw: string;
 };
-
 export type ParsedEmailResult =
   | ({ confidence: "high" } & ParsedTransaction)
   | { confidence: "low"; reason: string };
 
-// Pakistan has no daylight-saving time, so a fixed UTC+5 offset is always
-// correct (unlike most timezones, which need a real tz database).
+// Keep these phrases aligned with NAYAPAY_QUERY, including for history.list.
+export function classifyNayaPaySubject(subject: string): NayaPayEmailKind | null {
+  if (/\breversed\b/i.test(subject)) return "reversal";
+  const phrases = [
+    ["you spent", "spent"], ["you sent", "sent"], ["you got", "got"],
+    ["you subscribed", "bundle"], ["you topped up", "topup"], ["you recharged", "mtag"],
+  ] as const;
+  return phrases.find(([phrase]) => subject.toLowerCase().includes(phrase))?.[1] ?? null;
+}
+
 const KARACHI_OFFSET_MS = 5 * 60 * 60 * 1000;
-
-// NayaPay's real "You spent" template never puts the word "spent" in the
-// email body (only in the subject) -- the body is a receipt-style layout
-// keyed off "Amount Paid". The original "spent Rs./PKR X" pattern below
-// was validated only against an assumed/invented body format and matches
-// nothing in a real captured email; kept as an alternative so any email
-// that genuinely does say "spent" (or a future/alternate template) still
-// matches.
-const AMOUNT_PATTERN = /\b(?:spent|Amount Paid)\s+(?:Rs\.?|PKR)\s*([\d,]+)(?:\.(\d+))?/i;
-const VENDOR_PATTERN = /\b(?:at|to)\s+([A-Za-z0-9][A-Za-z0-9 &'-]*?)(?:\s+on\s|\.|,|$)/;
-// Real template's second, more reliable vendor anchor: "Merchant Details"
-// through "Merchant UIC" always brackets the merchant name (and its
-// city/country line) in the ADDITIONAL INFORMATION section.
+const MONEY = String.raw`\s+(?:Rs\.?|PKR)\s*([\d,]+)(?:\.(\d+))?`;
 const MERCHANT_DETAILS_PATTERN = /Merchant Details\s+([\s\S]*?)\s*Merchant UIC/i;
-const EXPLICIT_DATE_PATTERN = /\bon\s+(\d{4}-\d{2}-\d{2})/i;
+const VENDOR_PATTERN = /\b(?:at|to)\s+([A-Za-z0-9][A-Za-z0-9 &'-]*?)(?:\s+on\s|\.|,|$)/;
 
-function extractDate(email: GmailMessage): string {
-  const explicit = email.bodyText.match(EXPLICIT_DATE_PATTERN);
+function labelledAmount(text: string, label: string): RegExpMatchArray | null {
+  return text.match(new RegExp(`\\b(?:${label.replace(/ /g, "\\s+")})${MONEY}`, "i"));
+}
+
+function cents(match: RegExpMatchArray | null): number | null {
+  if (!match || (match[2]?.length ?? 0) > 2) return null;
+  const value = Math.round(Number(`${match[1].replace(/,/g, "")}.${match[2] ?? "0"}`) * 100);
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function extractDate(email: GmailMessage): string | null {
+  // This is already Karachi local time: retain its calendar date, never add UTC+5.
+  const local = email.bodyText.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4}),\s*\d{1,2}:\d{2}\s*[AP]M\b/i);
+  if (local) {
+    const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(local[2].toLowerCase()) + 1;
+    const date = `${local[3]}-${String(month).padStart(2, "0")}-${local[1].padStart(2, "0")}`;
+    const parsedDate = new Date(`${date}T00:00:00Z`);
+    return Number.isFinite(parsedDate.getTime()) && parsedDate.toISOString().slice(0, 10) === date ? date : null;
+  }
+  const explicit = email.bodyText.match(/\bon\s+(\d{4}-\d{2}-\d{2})/i);
   if (explicit) return explicit[1];
-
-  // No explicit date in the body -- fall back to the Gmail receive
-  // timestamp converted to Asia/Karachi local date (never the raw UTC
-  // date, which can land on the wrong calendar day for a late-night spend).
-  const utcMillis = Number(email.internalDate);
-  return new Date(utcMillis + KARACHI_OFFSET_MS).toISOString().slice(0, 10);
+  const received = Number(email.internalDate);
+  return Number.isFinite(received) && Math.abs(received + KARACHI_OFFSET_MS) <= 8.64e15
+    ? new Date(received + KARACHI_OFFSET_MS).toISOString().slice(0, 10) : null;
 }
 
 export function parseNayaPayEmail(email: GmailMessage): ParsedEmailResult {
-  const amountMatch = email.bodyText.match(AMOUNT_PATTERN);
-  if (!amountMatch) {
-    return { confidence: "low", reason: "no amount found" };
+  const kind = classifyNayaPaySubject(email.subject);
+  if (!kind) return { confidence: "low", reason: "unrecognized subject" };
+  const label = kind === "sent" ? "Amount Sent" : kind === "got" ? "Amount Received"
+    : kind === "reversal" ? "of" : kind === "spent" ? "Amount Paid|spent" : "Amount Paid";
+  let amountMatch = labelledAmount(email.bodyText, label);
+  // Foreign receipts expose principal + fees rather than Amount Paid. Only use
+  // their total when corroborated by the subject, never the principal alone.
+  if (kind === "spent" && /\bTransaction Amount\b/i.test(email.bodyText)) {
+    amountMatch = labelledAmount(email.bodyText, "Total Amount");
+    const subjectAmount = cents(labelledAmount(email.subject, "You spent"));
+    if (subjectAmount === null || subjectAmount !== cents(amountMatch)) {
+      return { confidence: "low", reason: "ambiguous foreign transaction total" };
+    }
   }
+  if (!amountMatch) return { confidence: "low", reason: "no amount found" };
+  if ((amountMatch[2]?.length ?? 0) > 2) return { confidence: "low", reason: "ambiguous decimal precision" };
+  const amountCents = cents(amountMatch);
+  if (amountCents === null) return { confidence: "low", reason: "unparseable amount" };
 
-  const [, integerPart, decimalPart] = amountMatch;
-  if (decimalPart && decimalPart.length > 2) {
-    return { confidence: "low", reason: "ambiguous decimal precision" };
+  let vendorRaw: string | undefined;
+  if (kind === "sent" || kind === "got") {
+    const connector = kind === "sent" ? "to" : "from";
+    vendorRaw = email.subject.match(new RegExp(`^You ${kind}${MONEY}\\s+${connector}\\s+(.+)$`, "i"))?.[3];
+  } else if (kind === "reversal") {
+    const destination = email.bodyText.match(/\bsent\s+to\s+([\s\S]+?)\s+was\s+unsuccessful\b/i)?.[1]?.replace(/\s+/g, " ").trim();
+    if (destination) {
+      // Preserve masked bank suffixes (e.g. -0001); remove mobile numbers.
+      const name = destination.replace(/[-\s]+\+?\d[\d -]{6,}$/, "").trim();
+      vendorRaw = `Reversal: ${/mobile top[ -]?up/i.test(email.subject + " " + email.bodyText) ? `${name} mobile top-up` : name}`;
+    }
+  } else if (kind === "bundle" || kind === "topup") {
+    vendorRaw = email.bodyText.match(/\b([A-Za-z][A-Za-z &'-]*?\s+Mobile Top[ -]?Up)\b(?=\s+(?:[\d+]|[A-Za-z]*[xX*]))/i)?.[1];
+    // The product begins after the success heading, even in flattened snippets.
+    vendorRaw = vendorRaw?.replace(/^.*?\bsuccessful\s+/i, "");
+  } else if (kind === "mtag") {
+    if (/\bM[ -]?Tag Recharge\b/i.test(email.bodyText)) vendorRaw = "M-Tag Recharge";
+  } else {
+    // Merchant Details is authoritative and wins over boilerplate at/to text.
+    vendorRaw = email.bodyText.match(MERCHANT_DETAILS_PATTERN)?.[1];
+    vendorRaw ??= email.subject.match(new RegExp(`^You spent${MONEY}\\s+at\\s+(.+)$`, "i"))?.[3];
+    vendorRaw ??= email.bodyText.slice((amountMatch.index ?? 0) + amountMatch[0].length).match(VENDOR_PATTERN)?.[1];
   }
-
-  const amountValue = Number.parseFloat(
-    `${integerPart.replace(/,/g, "")}${decimalPart ? `.${decimalPart}` : ""}`
-  );
-  if (!Number.isFinite(amountValue)) {
-    return { confidence: "low", reason: "unparseable amount" };
-  }
-  const amountCents = Math.round(amountValue * 100);
-
-  // Prefer the "Merchant Details ... Merchant UIC" anchor when it's
-  // present -- it's the template's own authoritative merchant field.
-  // [Live-data fix] A real captured email showed every vendor parsed as
-  // "this email": the generic at/to scan below matched a boilerplate
-  // phrase (e.g. a "reply to this email" disclaimer) sitting in the body
-  // before the real Merchant Details section, so the more reliable anchor
-  // never got a chance to run. Trying it first sidesteps that regardless
-  // of the exact boilerplate wording.
-  const merchantMatch = email.bodyText.match(MERCHANT_DETAILS_PATTERN);
-  let vendorRaw = merchantMatch?.[1]?.replace(/\s+/g, " ").trim();
-  if (!vendorRaw) {
-    // Search for the vendor only after the matched amount, so an earlier
-    // greeting like "Welcome to NayaPay" can never be mistaken for the
-    // vendor the user actually spent money at.
-    const textAfterAmount = email.bodyText.slice((amountMatch.index ?? 0) + amountMatch[0].length);
-    const vendorMatch = textAfterAmount.match(VENDOR_PATTERN);
-    vendorRaw = vendorMatch?.[1]?.trim();
-  }
-  if (!vendorRaw) {
-    return { confidence: "low", reason: "unrecognized layout: no vendor found" };
-  }
-
-  return { confidence: "high", amountCents, date: extractDate(email), vendorRaw };
+  vendorRaw = vendorRaw?.replace(/\s+/g, " ").trim();
+  if (!vendorRaw) return { confidence: "low", reason: "unrecognized layout: no vendor found" };
+  const date = extractDate(email);
+  if (!date) return { confidence: "low", reason: "unparseable date" };
+  return { confidence: "high", amountCents, direction: kind === "got" || kind === "reversal" ? "in" : "out", date, vendorRaw };
 }

@@ -1,9 +1,5 @@
-// Sender/subject-scoped Gmail query. The exact subject phrase is
-// provisional pending real NayaPay email samples (see the plan's
-// Plan-Level Rulings) -- this is the one place that restriction is
-// defined. listMessages always uses this internally (it takes no query
-// parameter), so there is no code path that can issue an unscoped read.
-export const NAYAPAY_QUERY = 'from:nayapay.com subject:"You spent"';
+// Sender/subject scope shared by backfill and expired-history recovery.
+export const NAYAPAY_QUERY = 'from:nayapay.com (subject:"You spent" OR subject:"You sent" OR subject:"You got" OR subject:"You subscribed" OR subject:"You topped up" OR subject:"You recharged" OR subject:"reversed")';
 
 export type GmailErrorType =
   | "auth_failure"
