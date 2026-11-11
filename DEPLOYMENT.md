@@ -67,17 +67,21 @@ Then Cloudflare dashboard -> Workers & Pages -> `nayaspend` -> Custom domains ->
 - Trigger a capture and confirm a transaction appears; with `DEEPSEEK_API_KEY` set, an Uncategorized row gets a suggestion.
 - Cron triggers: dashboard -> Workers -> `nayaspend-backend` -> Triggers shows the three schedules.
 
-## Automatic deploys (GitHub Actions)
-`.github/workflows/deploy.yml` runs on every push to `main`: typecheck and tests, then the production D1 migrations, then the Worker, then the Pages site. Nothing deploys if the checks fail.
+## Automatic deploys (Cloudflare Git integration)
+Push to `main` -> Cloudflare builds and deploys. `.github/workflows/ci.yml` only runs typechecks and tests (also on pull requests).
 
-One-time setup (you):
-1. Cloudflare dashboard -> My Profile -> API Tokens -> Create Token -> *Edit Cloudflare Workers* template. Under Permissions also add: Account / D1 / Edit, Account / Cloudflare Pages / Edit, Account / Queues / Edit. Account resources: your account. Zone resources: `nayaspend.app`.
-2. GitHub repo -> Settings -> Secrets and variables -> Actions -> New repository secret:
-   - `CLOUDFLARE_API_TOKEN`: the token from step 1
-   - `CLOUDFLARE_ACCOUNT_ID`: shown on the right of the Cloudflare dashboard home (or in any Workers URL)
-3. Merge to `main` (or run the workflow manually from the Actions tab) and watch it go green.
+**Frontend** (Workers & Pages -> `nayaspend` -> Connect to Git):
+- Repository `NayaSpend`, production branch `main`
+- Framework preset: React (Vite) - Build command: `npm --prefix ../backend ci && npm ci && npm run build` - Output directory: `dist` - Root directory: `frontend`
+- Environment variable (Production): `NODE_VERSION` = `22`
+(The frontend imports types from the backend, so the build installs both. `VITE_API_BASE_URL` comes from the committed `frontend/.env.production`.)
 
-The Worker's own secrets (Google, Resend, DeepSeek, encryption key) live in Cloudflare and are untouched by deploys. Backend integration tests are not part of CI yet (the Workers test runtime has not been verified in CI).
+**API** (Workers & Pages -> `nayaspend-backend` -> Settings -> Builds -> Connect):
+- Repository `NayaSpend`, production branch `main`, Root directory `backend`
+- Build command: `npm ci`
+- Deploy command: `npx wrangler@4 d1 migrations apply nayaspend --remote && npx wrangler@4 deploy`
+- Environment variable: `NODE_VERSION` = `22`
+Worker secrets live in Cloudflare and are untouched by deploys. Backend integration tests are not part of CI yet.
 
 ## Known follow-ups
 - Notification emails use Resend's shared sender `alerts@resend.dev`, which only delivers to the Resend account owner's address. Fine for one user; for others, verify `nayaspend.app` in Resend and change `FROM_ADDRESS` in `backend/src/services/notificationEngine.ts`.

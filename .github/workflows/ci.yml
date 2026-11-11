@@ -1,0 +1,28 @@
+name: CI
+
+# Checks only. Deploys are done by Cloudflare's own Git integration (see
+# DEPLOYMENT.md): the Pages project builds the frontend and the Worker build
+# migrates D1 and deploys the API on every push to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - name: Backend typecheck
+        working-directory: backend
+        run: npm ci && npm run build
+      - name: Frontend typecheck and tests
+        working-directory: frontend
+        run: npm ci && npx tsc --noEmit && npx vitest run
