@@ -1,5 +1,6 @@
 ﻿import { useLayoutEffect, useRef } from "react";
 import { useReducedMotion } from "motion/react";
+import { Logo } from "../components/Logo";
 import { Intro } from "../components/landing/Intro";
 import { ProblemSection } from "../components/landing/ProblemSection";
 import { TravelSection } from "../components/landing/TravelSection";
@@ -21,7 +22,7 @@ export function Landing() {
     return () => document.documentElement.classList.remove("nayaspend-landing-scroll");
   }, []);
   return <div ref={root} id="top" className="landing" data-reduced-motion={reduce ? "true" : undefined}>
-    <header className="landing-header"><nav className="nav" aria-label="Main navigation"><a href="#top" aria-label="NayaSpend home"><b>NayaSpend</b></a><span><a href="#experience">Explore</a><a href="#privacy">Your privacy</a><a className="si" href="/login">Sign in</a></span></nav></header>
+    <header className="landing-header"><nav className="nav" aria-label="Main navigation"><a href="#top" aria-label="NayaSpend home"><Logo className="text-[23px] max-[760px]:text-[20px]" /></a><span><a href="#experience">Explore</a><a href="#privacy">Your privacy</a><a className="si" href="/login">Sign in</a></span></nav></header>
     <main><Intro reduce={reduce} /><ProblemSection reduce={reduce} /><TravelSection reduce={reduce} /><TourSection reduce={reduce} /><PrivacySection /><Finale reduce={reduce} /></main>
     <ScrollMascotBar reduce={reduce} lenis={lenis} />
   </div>;

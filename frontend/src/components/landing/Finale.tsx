@@ -26,6 +26,6 @@ export function Finale({ reduce }: { reduce: boolean }) {
   }, [reduce]);
   return <div ref={section} className="finale" id="start" style={{ "--p": reduce ? 1 : 0 } as CSSProperties}><div className="finale-card"><section ref={close} className="close" aria-labelledby="closing-title">
     <h2 className="rv" id="closing-title">Make sense of<br />your spending.</h2><p className="rv">Read-only Gmail access. You stay in control of your inbox.</p><a ref={button} className="btn rv" href="/login">Sign in with Google</a>
-    <footer><span>NayaSpend. Independent spending companion. Not affiliated with NayaPay.</span><span>Amounts shown are illustrative.</span><div className="footer-links"><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a><a href="#top">Back to top</a></div></footer>
+    <footer><span>NayaSpend. Independent spending companion. Not affiliated with NayaPay.</span><span>Amounts shown are illustrative.</span><div className="footer-links"><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a><a href="https://github.com/mhhassaan" target="_blank" rel="noopener noreferrer">GitHub</a><a href="#top">Back to top</a></div></footer>
   </section></div></div>;
 }
