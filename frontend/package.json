@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/ensure-backend-deps.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "lint": "eslint ."
