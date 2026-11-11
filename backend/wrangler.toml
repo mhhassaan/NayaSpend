@@ -45,3 +45,40 @@ crons = [
   "30 * * * *",   # hourly, offset 30 min: Watchdog
   "0 */6 * * *",  # every 6 hours: budget/bill evaluation
 ]
+
+# ---------------------------------------------------------------------------
+# Dev environment (deployed from the `dev` branch): its own Worker, D1 database,
+# queue and domain, so test data never touches production. Environments do not
+# inherit bindings, so everything is repeated. Deploy with `wrangler deploy --env dev`.
+# Secrets are separate too (`wrangler secret put NAME --env dev`).
+# ---------------------------------------------------------------------------
+[env.dev]
+name = "nayaspend-backend-dev"
+routes = [{ pattern = "api-dev.nayaspend.app", custom_domain = true }]
+
+[env.dev.vars]
+FRONTEND_BASE_URL = "https://dev.nayaspend.app"
+GMAIL_REDIRECT_URI = "https://api-dev.nayaspend.app/auth/gmail/callback"
+DEEPSEEK_MODEL = "deepseek-flash"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "nayaspend-dev"
+database_id = "63d7c0d0-2622-4839-8460-61d2f27bc292"
+
+[[env.dev.queues.producers]]
+queue = "capture-retry-dev"
+binding = "CAPTURE_RETRY_QUEUE"
+
+[[env.dev.queues.consumers]]
+queue = "capture-retry-dev"
+max_batch_size = 1
+max_retries = 0
+
+# Free plan allows 5 cron triggers per account and production uses 3, so dev
+# runs capture (hourly) and the budget/bill evaluation (6-hourly) but not the watchdog.
+[env.dev.triggers]
+crons = [
+  "0 * * * *",
+  "0 */6 * * *",
+]

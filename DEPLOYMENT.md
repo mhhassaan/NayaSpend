@@ -83,6 +83,26 @@ Push to `main` -> Cloudflare builds and deploys. `.github/workflows/ci.yml` only
 - Environment variable: `NODE_VERSION` = `22`
 Worker secrets live in Cloudflare and are untouched by deploys. Backend integration tests are not part of CI yet.
 
+## Dev environment and release flow
+Two long-lived branches only: `main` (production) and `dev`. All work is committed and pushed to `dev`; when it is verified on the dev site, merge `dev` into `main` (PR: https://github.com/mhhassaan/NayaSpend/compare/main...dev) and production deploys itself. After a release, bring dev up to date: `git checkout dev && git merge main && git push`.
+
+| | Production (`main`) | Dev (`dev`) |
+|---|---|---|
+| Site | nayaspend.app | dev.nayaspend.app |
+| API | api.nayaspend.app (Worker `nayaspend-backend`) | api-dev.nayaspend.app (Worker `nayaspend-backend-dev`) |
+| Database | D1 `nayaspend` | D1 `nayaspend-dev` (separate data) |
+| Queue | `capture-retry` | `capture-retry-dev` |
+
+Dev config lives in `backend/wrangler.toml` under `[env.dev]` (deploy by hand with `npx wrangler@4 deploy --env dev`; secrets with `secret put NAME --env dev`). Dev runs only two of the three cron triggers because the free plan allows 5 per account.
+
+**Dev Worker auto-deploy** (Workers & Pages -> Create -> Import a repository, or open `nayaspend-backend-dev` -> Settings -> Builds -> Connect): repository `NayaSpend`, production branch `dev`, root directory `backend`, build command `npm ci`, deploy command `npx wrangler@4 d1 migrations apply nayaspend-dev --remote --env dev && npx wrangler@4 deploy --env dev`, variable `NODE_VERSION` = `22`.
+
+**Dev frontend**: the Pages project already builds every non-production branch as a preview, so pushing `dev` publishes `dev.nayaspend.pages.dev`. In Pages -> Settings -> Variables and secrets add, for the **Preview** environment only, `VITE_API_BASE_URL` = `https://api-dev.nayaspend.app` and `NODE_VERSION` = `22`. Then point `dev.nayaspend.app` at it: Cloudflare DNS, CNAME `dev` -> `dev.nayaspend.pages.dev` (proxied), and add `dev.nayaspend.app` under the Pages project's custom domains if Cloudflare asks for it.
+
+**Google Cloud Console** (same OAuth client): add redirect URIs `https://api-dev.nayaspend.app/auth/google/callback` and `https://api-dev.nayaspend.app/auth/gmail/callback`, and `https://dev.nayaspend.app` as an authorized origin.
+
+**Migrations are the one thing that does not roll back.** They apply to the production database on every deploy of `main`, so a migration always reaches the dev database first (on a `dev` deploy) and gets checked there before the release merge.
+
 ## Known follow-ups
 - Notification emails use Resend's shared sender `alerts@resend.dev`, which only delivers to the Resend account owner's address. Fine for one user; for others, verify `nayaspend.app` in Resend and change `FROM_ADDRESS` in `backend/src/services/notificationEngine.ts`.
 - No `og:image` yet: add a 1200x630 image and `<meta property="og:image">` for link previews.
