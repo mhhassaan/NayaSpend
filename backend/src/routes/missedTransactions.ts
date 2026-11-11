@@ -1,9 +1,11 @@
+import { suggestionContext } from "../services/suggestionContext";
+import type { SuggestionEnv } from "../services/llmSuggestionService";
 import { requireAuth, type AuthUser } from "../middleware/auth";
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { logMissedTransaction, ValidationError } from "../adapters/manualAdapter";
 
-type Env = {
+type Env = SuggestionEnv & {
   DB: D1Database;
 };
 
@@ -25,7 +27,7 @@ export const missedTransactionsRoutes = new Hono<{ Bindings: Env; Variables: { u
       vendorRaw: String(body.vendorRaw ?? ""),
       amountCents: Number(body.amountCents),
       date: String(body.date ?? ""),
-    }, c.get("user").id);
+    }, c.get("user").id, suggestionContext(c));
     return c.json(result, 201);
   } catch (err) {
     // Only a validation failure is the caller's fault (400) -- anything

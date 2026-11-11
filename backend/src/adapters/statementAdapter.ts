@@ -1,3 +1,4 @@
+import { queueSuggestions, type SuggestionOptions } from "../services/llmSuggestionService";
 import Papa from "papaparse";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { transactions } from "../db/schema";
@@ -138,9 +139,12 @@ export async function importStatementCsv(
   db: DrizzleD1Database,
   csvText: string,
   fileRef: string,
-  userId: number
+  userId: number,
+  suggestions?: SuggestionOptions
 ): Promise<{ imported: number }> {
   const rows = parseStatementCsv(csvText, fileRef);
+  const insertedIds: number[] = [];
+  const rawRows = Papa.parse<Record<string, string>>(csvText.split(/\r?\n/).slice(Math.max(0, findHeaderLineIndex(csvText))).join("\n"), { header: true, skipEmptyLines: true }).data;
 
   for (const row of rows) {
     // Idempotent on (fileRef, rowIndex): re-importing the same file (a
@@ -167,6 +171,7 @@ export async function importStatementCsv(
         .onConflictDoNothing({ target: transactions.statementRowKey })
         .returning({ id: transactions.id });
       if (inserted) {
+        insertedIds.push(inserted.id);
         try {
           await runDedupCheck(db, inserted.id);
         } catch (err) {
@@ -174,7 +179,7 @@ export async function importStatementCsv(
         }
       }
     } else {
-      await db
+      const [inserted] = await db
         .insert(transactions)
         .values({
           userId,
@@ -189,12 +194,16 @@ export async function importStatementCsv(
             fileRef,
             rowIndex: row.rowIndex,
             quarantineReason: row.reason,
+            bodyExcerpt: JSON.stringify(rawRows[row.rowIndex] ?? {}).slice(0, 1500),
           }),
           statementRowKey,
         })
-        .onConflictDoNothing({ target: transactions.statementRowKey });
+        .onConflictDoNothing({ target: transactions.statementRowKey })
+        .returning({ id: transactions.id });
+      if (inserted) insertedIds.push(inserted.id);
     }
   }
 
+  await queueSuggestions(db, userId, insertedIds, suggestions);
   return { imported: rows.length };
 }

@@ -1,3 +1,4 @@
+import { suggestionContext } from "../services/suggestionContext";
 import { eq } from "drizzle-orm";
 import { requireAuth, type AuthUser } from "../middleware/auth";
 import { Hono } from "hono";
@@ -40,6 +41,6 @@ export const captureRoutes = new Hono<{ Bindings: Env; Variables: { user: AuthUs
       return c.text("No Gmail account connected", 409);
     }
 
-    const result = await runBackfill(db, client, c.get("user").id);
+    const result = await runBackfill(db, client, c.get("user").id, suggestionContext(c));
     return c.json(result);
   });

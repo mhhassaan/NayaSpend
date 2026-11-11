@@ -29,6 +29,7 @@ function TransactionRow({ transaction, onOpen }: { transaction: Transaction; onO
           <button type="button" onClick={() => onOpen(transaction)} className="text-left">
             <Pill>{transaction.category}</Pill>
           </button>
+          {transaction.suggestion && transaction.suggestionStatus === "pending" && <span className="font-body text-[12px] text-text-secondary">AI suggestion available</span>}
           {transaction.reviewStatus !== "committed" && <Pill tone="warning">{transaction.reviewStatus}</Pill>}
           {transaction.dedupResolution && transaction.dedupResolution !== "pending" && (
             <Pill tone="neutral">{transaction.dedupResolution}</Pill>
@@ -171,7 +172,7 @@ export function Transactions() {
               className="shrink-0 self-start overflow-hidden"
             >
               <div className="w-[400px]">
-                <TransactionDetailPanel transaction={activeTransaction} onClose={() => setActiveTransaction(null)} />
+                <TransactionDetailPanel transaction={transactions.find(row => row.id === activeTransaction.id) ?? activeTransaction} onClose={() => setActiveTransaction(null)} />
               </div>
             </motion.aside>
           )}

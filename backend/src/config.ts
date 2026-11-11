@@ -3,6 +3,8 @@ import { base64ToBytes } from "./security";
 const ENCRYPTION_KEY_LENGTH_BYTES = 32; // AES-256 requires exactly 32 key bytes.
 
 export type ConfigEnv = {
+  DEEPSEEK_API_KEY?: string;
+  DEEPSEEK_MODEL?: string;
   GMAIL_CLIENT_ID: string;
   GMAIL_CLIENT_SECRET: string;
   GMAIL_REDIRECT_URI: string;

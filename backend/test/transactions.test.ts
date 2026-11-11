@@ -397,13 +397,13 @@ describe("transactions routes", () => {
     expect(updated).toMatchObject({ vendorRaw: "Starbucks Coffee", amount: 1250, date: "2026-10-05", category: "Coffee" });
   });
 
-  test("PATCH /:id rejects a non-positive-integer amount", async () => {
+  test("PATCH /:id rejects a fractional amount", async () => {
     const db = drizzle(env.DB);
     const row = await seed(db, userId);
 
     const res = await transactionsRoutes.request(
       `/${row.id}`,
-      { method: "PATCH", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ amount: -5 }) },
+      { method: "PATCH", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: JSON.stringify({ amount: 1.5 }) },
       env
     );
 

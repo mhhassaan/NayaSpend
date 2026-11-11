@@ -1,18 +1,19 @@
+import { CANONICAL_CATEGORIES } from "../../../shared/categories";
 import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { categoryRules } from "../db/schema";
 
-const UNCATEGORIZED = "Uncategorized";
+const UNCATEGORIZED = CANONICAL_CATEGORIES[CANONICAL_CATEGORIES.length - 1];
 
 // Explicit transfer descriptions take priority over merchant-like recipient names.
 // Word boundaries avoid matches such as "mart" in "smart" or "jazz" in "jazzcash".
-const KEYWORD_RULES: { pattern: RegExp; category: string }[] = [
-  { pattern: /\b(fund transfer|money received|money sent|raast|ibft|peer[ -]to[ -]peer)\b/, category: "Transfers" },
-  { pattern: /\b(pharmacyy?|pharmacies|medical store|chemist|hospital|clinic)\b/, category: "Health" },
-  { pattern: /\b(kfc|foodpanda|sweets?|bakery|bakers?|restaurants?|cafe|coffee|biryani|pizza|burgers?|bbq|barbecue|potato factory|mcdonald'?s|bundu khan)\b/, category: "Food & Dining" },
-  { pattern: /\b(mart|supermarket|cash (?:and|&) carry|grocer(?:y|ies|s)?|general store)\b/, category: "Groceries" },
-  { pattern: /\b(gasoline|petrol|fuel|careem|uber|bykea|taxi)\b/, category: "Transport" },
-  { pattern: /\b(mobile top[ -]?up|recharge|m[ -]?tag|jazz|zong|ufone|telenor|electricity|gas bill|water bill|internet|wi[ -]?fi|lesco|iesco|k[ -]electric|ptcl|sngpl|ssgc)\b/, category: "Utilities" },
+const KEYWORD_RULES: { pattern: RegExp; category: (typeof CANONICAL_CATEGORIES)[number] }[] = [
+  { pattern: /\b(fund transfer|money received|money sent|raast|ibft|peer[ -]to[ -]peer)\b/, category: CANONICAL_CATEGORIES[0] },
+  { pattern: /\b(pharmacyy?|pharmacies|medical store|chemist|hospital|clinic)\b/, category: CANONICAL_CATEGORIES[1] },
+  { pattern: /\b(kfc|foodpanda|sweets?|bakery|bakers?|restaurants?|cafe|coffee|biryani|pizza|burgers?|bbq|barbecue|potato factory|mcdonald'?s|bundu khan)\b/, category: CANONICAL_CATEGORIES[2] },
+  { pattern: /\b(mart|supermarket|cash (?:and|&) carry|grocer(?:y|ies|s)?|general store)\b/, category: CANONICAL_CATEGORIES[3] },
+  { pattern: /\b(gasoline|petrol|fuel|careem|uber|bykea|taxi)\b/, category: CANONICAL_CATEGORIES[4] },
+  { pattern: /\b(mobile top[ -]?up|recharge|m[ -]?tag|jazz|zong|ufone|telenor|electricity|gas bill|water bill|internet|wi[ -]?fi|lesco|iesco|k[ -]electric|ptcl|sngpl|ssgc)\b/, category: CANONICAL_CATEGORIES[5] },
 ];
 
 export function classifyByKeyword(vendorNormalized: string): string | null {

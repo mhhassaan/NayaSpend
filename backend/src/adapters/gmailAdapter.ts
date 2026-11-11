@@ -1,3 +1,4 @@
+import { queueSuggestions, type SuggestionOptions } from "../services/llmSuggestionService";
 import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { captureRuns, transactions } from "../db/schema";
@@ -140,7 +141,7 @@ export async function runBackfill(
   db: DrizzleD1Database,
   client: GmailClient,
   userId: number,
-  options?: { maxMessagesPerChunk?: number }
+  options?: { maxMessagesPerChunk?: number } & SuggestionOptions
 ): Promise<{ processed: number; nextPageToken: string | null; committed: number; quarantined: number; fetchFailed: number }> {
   const maxMessagesPerChunk = options?.maxMessagesPerChunk ?? DEFAULT_MAX_MESSAGES_PER_CHUNK;
 
@@ -239,6 +240,7 @@ export async function runBackfill(
   if (insertStatements.length > 0) {
     const batchResults = await db.batch([insertStatements[0], ...insertStatements.slice(1), checkpointUpdate]);
     const insertResults = batchResults.slice(0, insertStatements.length) as { id: number; reviewStatus: string }[][];
+    await queueSuggestions(db, userId, insertResults.flat().map(row => row.id), options);
 
     // Dedup-checking happens after the batch commits (it reads already-
     // durable committed rows, per the spec's "only compares committed
@@ -294,7 +296,7 @@ export async function runOngoingPoll(
   db: DrizzleD1Database,
   client: GmailClient,
   userId: number,
-  options?: { maxMessagesPerChunk?: number }
+  options?: { maxMessagesPerChunk?: number } & SuggestionOptions
 ): Promise<{ processed: number }> {
   const maxMessagesPerChunk = options?.maxMessagesPerChunk ?? DEFAULT_MAX_MESSAGES_PER_CHUNK;
 
@@ -402,6 +404,7 @@ export async function runOngoingPoll(
   if (insertStatements.length > 0) {
     const batchResults = await db.batch([insertStatements[0], ...insertStatements.slice(1), checkpointUpdate]);
     const insertResults = batchResults.slice(0, insertStatements.length) as { id: number; reviewStatus: string }[][];
+    await queueSuggestions(db, userId, insertResults.flat().map(row => row.id), options);
 
     for (const rows of insertResults) {
       for (const row of rows) {

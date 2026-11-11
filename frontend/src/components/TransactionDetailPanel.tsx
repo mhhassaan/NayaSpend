@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import type { TransactionSuggestion } from "../../../shared/categories";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/client";
 import { Button, Card, showError, showSuccess } from "./index";
 import { CategorySelect } from "./CategorySelect";
 import type { Transaction } from "../types/transaction";
-import { parseRupeesToCents } from "../utils/money";
+import { formatCents, parseRupeesToCents } from "../utils/money";
 
 export function TransactionDetailPanel({ transaction, onClose }: { transaction: Transaction | null; onClose: () => void }) {
   return transaction ? <DetailForm key={transaction.id} transaction={transaction} onClose={onClose} /> : null;
@@ -25,6 +27,33 @@ function parseProvenance(raw: string): Provenance | null {
 
 function DetailForm({ transaction, onClose }: { transaction: Transaction; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const reduceMotion = useReducedMotion();
+  const [suggestion, setSuggestion] = useState(transaction.suggestionStatus === "pending" ? transaction.suggestion : null);
+  const [suggestionError, setSuggestionError] = useState<string | null>(null);
+  useEffect(() => {
+    setSuggestion(transaction.suggestionStatus === "pending" ? transaction.suggestion : null);
+  }, [transaction.suggestion, transaction.suggestionStatus]);
+  const suggestionMutation = useMutation({
+    mutationFn: async (action: "suggest" | "dismiss") => {
+      const endpoint = apiClient.transactions[":id"].suggestion;
+      const args = { param: { id: String(transaction.id) } };
+      const res = action === "dismiss" ? await endpoint.$delete(args) : await endpoint.$post(args);
+      if (!res.ok) throw new Error("Couldn't get a suggestion. Please try again.");
+      const data = await res.json() as { suggestion: TransactionSuggestion | null };
+      return { action, suggestion: data.suggestion };
+    },
+    onMutate: () => setSuggestionError(null),
+    onSuccess: data => {
+      setSuggestion(data.suggestion);
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      if (data.action === "dismiss") showSuccess("Suggestion dismissed");
+      else if (!data.suggestion) setSuggestionError("No suggestion available right now. You can still edit this transaction yourself.");
+    },
+    onError: () => {
+      setSuggestionError("Couldn't get a suggestion. Please try again.");
+      showError("Couldn't update the suggestion.");
+    },
+  });
   const transactions = queryClient.getQueryData<Transaction[]>(["transactions"]) ?? [];
   const extraCategories = [...transactions.map(row => row.category), transaction.category];
   const [vendorRaw, setVendorRaw] = useState(transaction.vendorRaw);
@@ -72,7 +101,7 @@ function DetailForm({ transaction, onClose }: { transaction: Transaction; onClos
       return (await res.json()) as { resolved: string; matched: boolean };
     },
     onSuccess: (data) => {
-      showSuccess(data.matched ? "Committed — this matched a possible duplicate, check Dedup Review" : "Committed");
+      showSuccess(data.matched ? "Committed - this matched a possible duplicate, check Dedup Review" : "Committed");
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       onClose();
     },
@@ -113,6 +142,40 @@ function DetailForm({ transaction, onClose }: { transaction: Transaction; onClos
         <h2 className="font-semibold">Transaction details</h2>
         <Button type="button" variant="secondary" aria-label="Close transaction details" onClick={onClose}>Close</Button>
       </div>
+      {suggestion && (
+        <motion.section aria-label="Suggested" className="mb-4 rounded-md border border-vivid-violet bg-light-purple p-3 text-blackberry"
+          initial={reduceMotion ? false : { opacity: 0, transform: "translateY(4px)" }}
+          animate={{ opacity: 1, transform: "translateY(0px)" }}
+          transition={{ duration: reduceMotion ? 0 : 0.18, ease: [0.23, 1, 0.32, 1] }}>
+          <h3 className="font-display text-sm font-semibold">Suggested</h3>
+          <p className="mb-2 font-body text-[13px]">AI suggestion - check before accepting</p>
+          {suggestion.category ? (
+            <>
+              <p className="mb-3 font-body">Suggested category: {suggestion.category}</p>
+              <Button type="button" disabled={mutation.isPending || suggestionMutation.isPending} onClick={() => mutation.mutate(suggestion.category!)}>Accept</Button>
+            </>
+          ) : (
+            <>
+              <p className="break-words font-body">{suggestion.vendor}</p>
+              <p className="mb-3 font-body">{formatCents(suggestion.amount ?? 0)} - {suggestion.direction === "in" ? "Money in" : "Money out"}</p>
+              <Button type="button" disabled={suggestionMutation.isPending} onClick={() => {
+                setVendorRaw(suggestion.vendor ?? "");
+                setAmount(String((suggestion.amount ?? 0) / 100));
+                setDirection(suggestion.direction === "in" ? "Money in" : "Money out");
+                setClientError(null);
+              }}>Apply suggestion</Button>
+              <p className="mt-2 font-body text-[13px]">Review the fields, then Commit to save.</p>
+            </>
+          )}
+          <Button type="button" className="ml-2" variant="secondary" disabled={suggestionMutation.isPending || mutation.isPending} onClick={() => suggestionMutation.mutate("dismiss")}>Dismiss</Button>
+        </motion.section>
+      )}
+      {!suggestion && (transaction.category === "Uncategorized" || transaction.reviewStatus === "pending_review") && (
+        <Button type="button" className="mb-3" variant="secondary" disabled={suggestionMutation.isPending} onClick={() => suggestionMutation.mutate("suggest")}>
+          {suggestionMutation.isPending ? "Suggesting..." : "Suggest"}
+        </Button>
+      )}
+      {suggestionError && <p role="status" className="mb-3 font-body text-[13px] text-text-secondary">{suggestionError}</p>}
       {transaction.reviewStatus === "committed" ? (
         <div className="flex flex-col gap-3">
           <CategorySelect aria-label="Category" value={category} onChange={setCategory} extraCategories={extraCategories} />
